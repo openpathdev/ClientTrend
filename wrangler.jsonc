@@ -1,0 +1,23 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"compatibility_date": "2026-08-25",
+	"compatibility_flags": ["global_fetch_strictly_public"],
+	"name": "client-trends",
+	"main": "@astrojs/cloudflare/entrypoints/server",
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS"
+	},
+	"observability": {
+		"enabled": true
+	},
+	// Non-secret, public config only (PRD §40). Actual secrets
+	// (SUPABASE_*, HUBSPOT_API_TOKEN, CF_ACCESS_*) are provisioned via
+	// `.dev.vars` locally and `wrangler secret put` in each deployed
+	// environment — never committed here.
+	"vars": {
+		"PUBLIC_APP_ENV": "development"
+	}
+	// Phase 6 will add a `triggers.crons` entry here once the HubSpot
+	// scheduled sync handler exists (PRD §14, §39).
+}

@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/* Self-hosted, per weight only (400/500/600 sans, 400/500 mono) —
+   consistent with the self-hosted htmx/alpine pattern, no external font CDN. */
+@import "@fontsource/instrument-sans/400.css";
+@import "@fontsource/instrument-sans/500.css";
+@import "@fontsource/instrument-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+/* Client Trends · Cool Slate — see ClientTrends-StyleGuide.pdf */
+@theme {
+	--font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+	/* Ground & surface */
+	--color-canvas: #ecf1f5;
+	--color-surface: #fcfeff;
+	--color-table-header: #f4f7fa;
+	--color-zebra-row: #f6f8fa;
+
+	/* Line & structure */
+	--color-card-border: #d3dae1;
+	--color-section-rule: #e4e8ed;
+	--color-row-rule: #eff2f5;
+	--color-track: #dee4e9;
+
+	/* Text */
+	--color-ink: #1f242e;
+	--color-muted: #6c727a;
+	--color-label: #7a8189;
+	--color-link: #3b6987;
+
+	/* Status: healthy (on plan) */
+	--color-healthy-line: #599291;
+	--color-healthy-text: #1b575a;
+	--color-healthy-tint: #e0f5f6;
+	--color-healthy-halo: #cfedef;
+
+	/* Status: watch (drifting) */
+	--color-watch-line: #a99f74;
+	--color-watch-text: #5e5531;
+	--color-watch-tint: #f5f3e0;
+	--color-watch-halo: #efebd0;
+
+	/* Status: needs attention (off plan) */
+	--color-needs-attention-line: #a4666e;
+	--color-needs-attention-text: #753c44;
+	--color-needs-attention-tint: #ffeaec;
+	--color-needs-attention-halo: #fde0e2;
+
+	/* Active/selected filter chip fill */
+	--color-selected-filter: #1f242e;
+}
+
+/* HTMX loading indicator convention (PRD §30) — defined explicitly rather
+   than relying on htmx's auto-injected default styles. */
+.htmx-indicator {
+	opacity: 0;
+	transition: opacity 150ms ease-in;
+}
+.htmx-request.htmx-indicator,
+.htmx-request .htmx-indicator {
+	opacity: 1;
+}
+
+[x-cloak] {
+	display: none !important;
+}

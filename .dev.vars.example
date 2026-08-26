@@ -1,0 +1,15 @@
+# Copy this file to .dev.vars (gitignored) and fill in real values for local
+# development. In deployed environments these are set via
+# `wrangler secret put <NAME>`, never committed. See PRD §40.
+
+# Supabase (server-only — never exposed to the browser)
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# HubSpot (server-only, used only by the Phase 6 scheduled sync job)
+HUBSPOT_API_TOKEN=
+
+# Cloudflare Access (PRD §23). Leave both blank for local dev — access.ts
+# falls back to a fixed dev identity when CF_ACCESS_TEAM_DOMAIN is unset.
+CF_ACCESS_TEAM_DOMAIN=
+CF_ACCESS_AUD=

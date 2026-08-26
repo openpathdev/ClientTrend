@@ -1,0 +1,42 @@
+---
+export const prerender = false;
+
+import Layout from "../layouts/Layout.astro";
+import { env } from "cloudflare:workers";
+import { createSupabaseClient } from "../server/supabase";
+import { listStatuses } from "../server/data/statuses";
+import { listCsms } from "../server/data/csms";
+import { listStates } from "../server/data/states";
+import { listClients } from "../server/data/clients";
+import { renderOverviewPanel } from "../server/render/overviewPanel";
+import type { ClientFilters } from "../server/data/types";
+
+const url = new URL(Astro.request.url);
+const filters: ClientFilters = {
+	csmId: url.searchParams.get("csm") ?? undefined,
+	statusId: url.searchParams.get("status") ?? undefined,
+	stateCode: url.searchParams.get("state") ?? undefined,
+};
+
+const supabase = createSupabaseClient(env);
+const [statuses, csms, states, clients] = await Promise.all([
+	listStatuses(supabase),
+	listCsms(supabase),
+	listStates(supabase),
+	listClients(supabase, filters),
+]);
+
+const panelHtml = (await renderOverviewPanel({ clients, statuses, csms, states, filters })).toString();
+const accountCount = clients.length;
+---
+
+<Layout title="Overview">
+	<main class="mx-auto max-w-7xl px-6 py-10">
+		<header class="mb-6">
+			<h1 class="font-sans text-[26px] font-semibold tracking-[-0.02em] text-ink">Client Trends</h1>
+			<p class="mt-1 font-mono text-[13px] text-muted">{accountCount} account{accountCount === 1 ? "" : "s"}</p>
+		</header>
+
+		<Fragment set:html={panelHtml} />
+	</main>
+</Layout>

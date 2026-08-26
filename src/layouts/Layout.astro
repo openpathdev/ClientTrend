@@ -1,0 +1,52 @@
+---
+import "../styles/global.css";
+
+interface Props {
+	title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="generator" content={Astro.generator} />
+		<title>{title} · Client Trends</title>
+		<script is:inline src="/vendor/htmx.min.js"></script>
+		<script is:inline src="/vendor/alpine.min.js" defer></script>
+	</head>
+	<body class="min-h-screen bg-canvas font-sans text-ink">
+		<slot />
+
+		<div
+			id="cx-toast"
+			class="fixed bottom-4 right-4 z-50 hidden max-w-sm rounded-lg border border-needs-attention-line bg-needs-attention-tint px-4 py-2 text-[13px] text-needs-attention-text shadow-lg"
+			role="alert"
+		>
+		</div>
+		<script is:inline>
+			(function () {
+				var toast = document.getElementById("cx-toast");
+				var timer;
+				function show(message) {
+					toast.textContent = message;
+					toast.classList.remove("hidden");
+					clearTimeout(timer);
+					timer = setTimeout(function () {
+						toast.classList.add("hidden");
+					}, 4000);
+				}
+				document.addEventListener("htmx:responseError", function () {
+					show("Update failed — please try again.");
+				});
+				document.addEventListener("htmx:sendError", function () {
+					show("Network error — check your connection and try again.");
+				});
+			})();
+		</script>
+	</body>
+</html>

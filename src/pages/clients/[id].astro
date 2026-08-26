@@ -1,0 +1,67 @@
+---
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { env } from "cloudflare:workers";
+import { createSupabaseClient } from "../../server/supabase";
+import { getClientById } from "../../server/data/clients";
+import { listStatuses } from "../../server/data/statuses";
+import { listChanges } from "../../server/data/changes";
+import { listLinks } from "../../server/data/links";
+import { renderClientHeader } from "../../server/render/clientHeader";
+import { renderNotesSection } from "../../server/render/notesSection";
+import { renderChangesSection } from "../../server/render/changesSection";
+import { renderLinksSection } from "../../server/render/linksSection";
+
+const { id } = Astro.params;
+const supabase = createSupabaseClient(env);
+const client = id ? await getClientById(supabase, id) : null;
+
+if (!client) {
+	Astro.response.status = 404;
+}
+
+let headerHtml = "";
+let notesHtml = "";
+let changesHtml = "";
+let linksHtml = "";
+
+if (client) {
+	const [statuses, changes, links] = await Promise.all([
+		listStatuses(supabase),
+		listChanges(supabase, client.id),
+		listLinks(supabase, client.id),
+	]);
+	headerHtml = (await renderClientHeader(client, statuses)).toString();
+	notesHtml = (await renderNotesSection(client)).toString();
+	changesHtml = (await renderChangesSection(client.id, changes)).toString();
+	linksHtml = (await renderLinksSection(client.id, links)).toString();
+}
+---
+
+<Layout title={client ? client.name : "Client not found"}>
+	<main class="mx-auto max-w-5xl px-6 py-10">
+		<a href="/" class="text-[13px] font-medium text-link hover:underline">&larr; All clients</a>
+
+		{
+			client ? (
+				<div class="mt-4 flex flex-col gap-4">
+					<Fragment set:html={headerHtml} />
+					<Fragment set:html={notesHtml} />
+					<div class="grid grid-cols-1 gap-4 lg:grid-cols-4">
+						<div class="lg:col-span-3">
+							<Fragment set:html={changesHtml} />
+						</div>
+						<div class="lg:col-span-1">
+							<Fragment set:html={linksHtml} />
+						</div>
+					</div>
+				</div>
+			) : (
+				<div class="mt-6 rounded-2xl border border-dashed border-card-border bg-surface p-10 text-center">
+					<p class="text-[14px] text-muted">No client found with that ID.</p>
+				</div>
+			)
+		}
+	</main>
+</Layout>

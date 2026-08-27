@@ -1,0 +1,22 @@
+---
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { env } from "cloudflare:workers";
+import { createSupabaseClient } from "../../server/supabase";
+import { listMonthlyMetrics } from "../../server/data/monthlyMetrics";
+import { renderMetricAdminPanel } from "../../server/render/metricAdminPanel";
+
+const supabase = createSupabaseClient(env);
+const metrics = await listMonthlyMetrics(supabase);
+const panelHtml = (await renderMetricAdminPanel(metrics)).toString();
+---
+
+<Layout title="Metrics">
+	<main class="mx-auto max-w-3xl px-6 py-10">
+		<a href="/" class="text-[13px] font-medium text-link hover:underline">&larr; All clients</a>
+		<div class="mt-4">
+			<Fragment set:html={panelHtml} />
+		</div>
+	</main>
+</Layout>

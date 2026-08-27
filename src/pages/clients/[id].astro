@@ -8,10 +8,15 @@ import { getClientById } from "../../server/data/clients";
 import { listStatuses } from "../../server/data/statuses";
 import { listChanges } from "../../server/data/changes";
 import { listLinks } from "../../server/data/links";
+import { listMonthlyMetrics } from "../../server/data/monthlyMetrics";
+import { listMonthlyDataValues } from "../../server/data/monthlyData";
+import { getCommentCounts } from "../../server/data/comments";
+import { trailingMonths, DEFAULT_MONTH_WINDOW } from "../../server/months";
 import { renderClientHeader } from "../../server/render/clientHeader";
 import { renderNotesSection } from "../../server/render/notesSection";
 import { renderChangesSection } from "../../server/render/changesSection";
 import { renderLinksSection } from "../../server/render/linksSection";
+import { renderMonthlyDataTable } from "../../server/render/monthlyDataTable";
 
 const { id } = Astro.params;
 const supabase = createSupabaseClient(env);
@@ -25,22 +30,38 @@ let headerHtml = "";
 let notesHtml = "";
 let changesHtml = "";
 let linksHtml = "";
+let monthlyDataHtml = "";
 
 if (client) {
-	const [statuses, changes, links] = await Promise.all([
+	const months = trailingMonths(DEFAULT_MONTH_WINDOW);
+	const [statuses, changes, links, metrics, values, commentCounts] = await Promise.all([
 		listStatuses(supabase),
 		listChanges(supabase, client.id),
 		listLinks(supabase, client.id),
+		listMonthlyMetrics(supabase),
+		listMonthlyDataValues(supabase, client.id, months[0], months[months.length - 1]),
+		getCommentCounts(supabase, client.id, "monthly_data", months[0], months[months.length - 1]),
 	]);
 	headerHtml = (await renderClientHeader(client, statuses)).toString();
 	notesHtml = (await renderNotesSection(client)).toString();
 	changesHtml = (await renderChangesSection(client.id, changes)).toString();
 	linksHtml = (await renderLinksSection(client.id, links)).toString();
+	monthlyDataHtml = (
+		await renderMonthlyDataTable({
+			clientId: client.id,
+			section: "monthly_data",
+			title: "Performance",
+			metrics,
+			months,
+			values,
+			commentCounts,
+		})
+	).toString();
 }
 ---
 
 <Layout title={client ? client.name : "Client not found"}>
-	<main class="mx-auto max-w-5xl px-6 py-10">
+	<main class="mx-auto max-w-6xl px-6 py-10">
 		<a href="/" class="text-[13px] font-medium text-link hover:underline">&larr; All clients</a>
 
 		{
@@ -56,6 +77,7 @@ if (client) {
 							<Fragment set:html={linksHtml} />
 						</div>
 					</div>
+					<Fragment set:html={monthlyDataHtml} />
 				</div>
 			) : (
 				<div class="mt-6 rounded-2xl border border-dashed border-card-border bg-surface p-10 text-center">

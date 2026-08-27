@@ -10,6 +10,11 @@ export function formatPlain(value: string | number | null): string {
 	return String(value);
 }
 
+export function formatPercent(value: number | null): string {
+	if (value === null) return EMPTY;
+	return `${value}%`;
+}
+
 /** Display form of a website: strip protocol/www, keep the bare domain. */
 export function displayWebsite(website: string | null): string {
 	if (!website) return EMPTY;

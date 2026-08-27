@@ -7,14 +7,20 @@ import { listStates } from "./data/states";
 import { listClients, updateClientStatus, updateGeneralNotes, getClientById } from "./data/clients";
 import { listChanges, createChange, updateChange, deleteChange } from "./data/changes";
 import { listLinks, createLink, updateLink, deleteLink } from "./data/links";
+import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
+import { upsertMonthlyDataValue } from "./data/monthlyData";
+import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { renderOverviewPanel } from "./render/overviewPanel";
 import { renderClientCard } from "./render/card";
 import { renderClientHeader } from "./render/clientHeader";
 import { renderNotesSection } from "./render/notesSection";
 import { renderChangesSection } from "./render/changesSection";
 import { renderLinksSection } from "./render/linksSection";
-import { isValidLinkUrl, validateLength } from "./validation";
-import { CHANGE_CATEGORIES, type ChangeCategory, type ClientFilters } from "./data/types";
+import { renderMetricCell } from "./render/monthlyDataTable";
+import { renderCommentPanel } from "./render/commentPanel";
+import { renderMetricAdminPanel } from "./render/metricAdminPanel";
+import { isValidLinkUrl, validateLength, parseMonthlyCellValue } from "./validation";
+import { CHANGE_CATEGORIES, type ChangeCategory, type ClientFilters, type CommentSection, type MonthlyMetricValueType } from "./data/types";
 
 export const app = new Hono<AppEnv>();
 
@@ -201,6 +207,152 @@ app.delete("/api/clients/:id/links/:linkId", async (c) => {
 	const clientId = c.req.param("id");
 	await deleteLink(supabase, c.req.param("linkId"));
 	return c.html(renderLinksSection(clientId, await listLinks(supabase, clientId)));
+});
+
+// ---- Monthly Data (PRD §10/§20) ----
+
+app.put("/api/clients/:id/monthly-data/:metricId/:month", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const metricId = c.req.param("metricId");
+	const month = c.req.param("month");
+
+	const metrics = await listMonthlyMetrics(supabase);
+	const metricIndex = metrics.findIndex((m) => m.id === metricId);
+	const metric = metrics[metricIndex];
+	if (!metric) return c.text("Unknown metric", 404);
+	if (metric.source === "hubspot") return c.text("This metric is HubSpot-owned and read-only", 400);
+
+	const body = await c.req.parseBody();
+	const raw = typeof body.value === "string" ? body.value : "";
+	const parsed = parseMonthlyCellValue(raw, metric.valueType, metric.minValue, metric.maxValue);
+	const bgClass = metricIndex % 2 === 0 ? "bg-surface" : "bg-zebra-row";
+
+	if (!parsed.ok) {
+		return c.html(
+			renderMetricCell(
+				clientId,
+				metric,
+				month,
+				{ id: "", clientId, metricId, month, value: null, valueText: raw, updatedBy: null, updatedAt: "" },
+				bgClass,
+			),
+			400,
+		);
+	}
+
+	const updatedBy = c.get("userEmail");
+	await upsertMonthlyDataValue(supabase, {
+		clientId,
+		metricId,
+		month,
+		value: parsed.value,
+		valueText: parsed.valueText,
+		updatedBy,
+	});
+
+	const saved = {
+		id: "",
+		clientId,
+		metricId,
+		month,
+		value: parsed.value,
+		valueText: parsed.valueText,
+		updatedBy,
+		updatedAt: new Date().toISOString(),
+	};
+	return c.html(renderMetricCell(clientId, metric, month, saved, bgClass));
+});
+
+// ---- Comments (PRD §12), shared by Monthly Data now and Paid Ads in Phase 5 ----
+
+function readSection(value: unknown): CommentSection {
+	return value === "paid_ads" ? "paid_ads" : "monthly_data";
+}
+
+app.get("/api/clients/:id/comments", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const section = readSection(c.req.query("section"));
+	const month = c.req.query("month") ?? "";
+	const comments = await listComments(supabase, clientId, section, month);
+	return c.html(renderCommentPanel(clientId, section, month, comments));
+});
+
+app.post("/api/clients/:id/comments", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const body = await c.req.parseBody();
+	const section = readSection(body.section);
+	const month = typeof body.month === "string" ? body.month : "";
+	const commentBody = typeof body.body === "string" ? body.body : "";
+
+	if (!validateLength(commentBody, 1, 2000)) {
+		const comments = await listComments(supabase, clientId, section, month);
+		return c.html(renderCommentPanel(clientId, section, month, comments, "Comment must be 1-2,000 characters."), 400);
+	}
+
+	await createComment(supabase, { clientId, section, month, body: commentBody.trim(), createdBy: c.get("userEmail") });
+	const comments = await listComments(supabase, clientId, section, month);
+	return c.html(renderCommentPanel(clientId, section, month, comments));
+});
+
+app.patch("/api/clients/:id/comments/:commentId", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const commentId = c.req.param("commentId");
+	const body = await c.req.parseBody();
+	const section = readSection(body.section);
+	const month = typeof body.month === "string" ? body.month : "";
+	const commentBody = typeof body.body === "string" ? body.body : "";
+
+	if (!validateLength(commentBody, 1, 2000)) {
+		const comments = await listComments(supabase, clientId, section, month);
+		return c.html(renderCommentPanel(clientId, section, month, comments, "Comment must be 1-2,000 characters."), 400);
+	}
+
+	await updateComment(supabase, commentId, commentBody.trim(), c.get("userEmail"));
+	const comments = await listComments(supabase, clientId, section, month);
+	return c.html(renderCommentPanel(clientId, section, month, comments));
+});
+
+app.delete("/api/clients/:id/comments/:commentId", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const body = await c.req.parseBody();
+	const section = readSection(body.section);
+	const month = typeof body.month === "string" ? body.month : "";
+
+	await deleteComment(supabase, c.req.param("commentId"));
+	const comments = await listComments(supabase, clientId, section, month);
+	return c.html(renderCommentPanel(clientId, section, month, comments));
+});
+
+// ---- Metric catalog admin (PRD §20) ----
+
+app.post("/api/admin/monthly-metrics", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const body = await c.req.parseBody();
+	const key = typeof body.key === "string" ? body.key.trim() : "";
+	const label = typeof body.label === "string" ? body.label.trim() : "";
+	const valueTypeRaw = typeof body.valueType === "string" ? body.valueType : "text";
+	const valueType: MonthlyMetricValueType =
+		valueTypeRaw === "integer" || valueTypeRaw === "percent" ? valueTypeRaw : "text";
+
+	const metrics = await listMonthlyMetrics(supabase);
+	const keyValid = /^[a-z0-9_]+$/.test(key);
+	const keyTaken = metrics.some((m) => m.key === key);
+
+	if (!keyValid || keyTaken || !validateLength(label, 1, 200)) {
+		const error = keyTaken
+			? "That key is already in use."
+			: "Key must be lowercase letters, numbers, and underscores; label is required.";
+		return c.html(renderMetricAdminPanel(metrics, error), 400);
+	}
+
+	const nextSortOrder = metrics.reduce((max, m) => Math.max(max, m.sortOrder), 0) + 1;
+	await createMonthlyMetric(supabase, { key, label, valueType, sortOrder: nextSortOrder });
+	return c.html(renderMetricAdminPanel(await listMonthlyMetrics(supabase)));
 });
 
 export default app;

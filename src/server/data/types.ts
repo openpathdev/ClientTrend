@@ -42,6 +42,8 @@ export type ClientRow = {
 	generalNotes: string | null;
 	generalNotesUpdatedAt: string | null;
 	generalNotesUpdatedBy: string | null;
+	adSpendPerMonth: number | null;
+	paidAdsGoLiveDate: string | null;
 };
 
 export type ClientFilters = {
@@ -102,6 +104,10 @@ export type MonthlyDataValue = {
 	updatedBy: string | null;
 	updatedAt: string;
 };
+
+/** Same shape as Monthly Data's metric/value tables (PRD §11) — aliased, not duplicated. */
+export type PaidAdsMetric = MonthlyMetric;
+export type PaidAdsDataValue = MonthlyDataValue;
 
 export type CommentSection = "monthly_data" | "paid_ads";
 

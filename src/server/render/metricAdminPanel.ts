@@ -1,25 +1,47 @@
 import { html } from "hono/html";
 import type { MonthlyMetric } from "../data/types";
 
-/**
- * Small admin UI for the Monthly Data metric catalog (PRD §20 decision:
- * adding a metric is an in-app action, not a database-only/developer task).
- * List + add only for MVP — no edit/delete, matching the narrow scope
- * tasks.md called for.
- */
-export function renderMetricAdminPanel(metrics: MonthlyMetric[], error?: string) {
-	return html`<section id="metric-admin-section" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
-		<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">Monthly Data Metrics</h2>
-		<p class="mt-1 text-[12.5px] text-muted">
-			New metrics appear in every client's Performance table automatically — no code changes needed.
-		</p>
+export type MetricCatalogType = "monthly" | "paid_ads";
 
-		<form hx-post="/api/admin/monthly-metrics" hx-target="#metric-admin-section" hx-swap="outerHTML" class="mt-3 flex flex-wrap items-end gap-2">
+const CATALOG_CONFIG: Record<MetricCatalogType, { sectionId: string; endpoint: string; title: string; tableLabel: string }> = {
+	monthly: {
+		sectionId: "monthly-metric-admin-section",
+		endpoint: "/api/admin/monthly-metrics",
+		title: "Monthly Data Metrics",
+		tableLabel: "Performance table",
+	},
+	paid_ads: {
+		sectionId: "paid-ads-metric-admin-section",
+		endpoint: "/api/admin/paid-ads-metrics",
+		title: "Paid Ads Metrics",
+		tableLabel: "Paid Ads table",
+	},
+};
+
+/**
+ * Small admin UI for a metric catalog (PRD §20 decision: adding a metric
+ * is an in-app action, not a database-only/developer task) — reused for
+ * both Monthly Data (Phase 4) and Paid Ads (Phase 5) catalogs, since they're
+ * the same shape (PRD §11). List + add only for MVP — no edit/delete,
+ * matching the narrow scope tasks.md called for.
+ */
+export function renderMetricAdminPanel(catalog: MetricCatalogType, metrics: MonthlyMetric[], error?: string) {
+	const config = CATALOG_CONFIG[catalog];
+	return html`<section id="${config.sectionId}" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
+		<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${config.title}</h2>
+		<p class="mt-1 text-[12.5px] text-muted">New metrics appear in every client's ${config.tableLabel} automatically — no code changes needed.</p>
+
+		<form
+			hx-post="${config.endpoint}"
+			hx-target="#${config.sectionId}"
+			hx-swap="outerHTML"
+			class="mt-3 flex flex-wrap items-end gap-2"
+		>
 			${error ? html`<p class="w-full text-[12.5px] text-needs-attention-text" role="alert">${error}</p>` : ""}
 			<div class="flex flex-col gap-1">
-				<label for="metric-key" class="text-[11px] uppercase tracking-[0.06em] text-label">Key</label>
+				<label for="${catalog}-metric-key" class="text-[11px] uppercase tracking-[0.06em] text-label">Key</label>
 				<input
-					id="metric-key"
+					id="${catalog}-metric-key"
 					type="text"
 					name="key"
 					required
@@ -30,9 +52,9 @@ export function renderMetricAdminPanel(metrics: MonthlyMetric[], error?: string)
 				/>
 			</div>
 			<div class="flex flex-col gap-1">
-				<label for="metric-label" class="text-[11px] uppercase tracking-[0.06em] text-label">Label</label>
+				<label for="${catalog}-metric-label" class="text-[11px] uppercase tracking-[0.06em] text-label">Label</label>
 				<input
-					id="metric-label"
+					id="${catalog}-metric-label"
 					type="text"
 					name="label"
 					required
@@ -41,9 +63,9 @@ export function renderMetricAdminPanel(metrics: MonthlyMetric[], error?: string)
 				/>
 			</div>
 			<div class="flex flex-col gap-1">
-				<label for="metric-type" class="text-[11px] uppercase tracking-[0.06em] text-label">Type</label>
+				<label for="${catalog}-metric-type" class="text-[11px] uppercase tracking-[0.06em] text-label">Type</label>
 				<select
-					id="metric-type"
+					id="${catalog}-metric-type"
 					name="valueType"
 					class="rounded-md border border-card-border px-2 py-1.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 				>

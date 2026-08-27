@@ -6,6 +6,7 @@ const CLIENT_SELECT = `
 	id, name, website, population, domain_authority, legal_status, state_code,
 	hubspot_company_id, hubspot_sync_status, hubspot_synced_at,
 	general_notes, general_notes_updated_at, general_notes_updated_by,
+	ad_spend_per_month, paid_ads_go_live_date,
 	csm:csms ( id, name, email, active ),
 	status:statuses!inner ( id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active )
 `;
@@ -24,6 +25,8 @@ type ClientQueryRow = {
 	general_notes: string | null;
 	general_notes_updated_at: string | null;
 	general_notes_updated_by: string | null;
+	ad_spend_per_month: number | null;
+	paid_ads_go_live_date: string | null;
 	csm: { id: string; name: string; email: string | null; active: boolean } | null;
 	status: {
 		id: string;
@@ -55,6 +58,8 @@ function mapClient(row: ClientQueryRow): ClientRow {
 		generalNotes: row.general_notes,
 		generalNotesUpdatedAt: row.general_notes_updated_at,
 		generalNotesUpdatedBy: row.general_notes_updated_by,
+		adSpendPerMonth: row.ad_spend_per_month,
+		paidAdsGoLiveDate: row.paid_ads_go_live_date,
 		status: {
 			id: row.status.id,
 			name: row.status.name,
@@ -95,6 +100,20 @@ export async function updateClientStatus(
 ): Promise<ClientRow | null> {
 	const { error: updateError } = await supabase.from("clients").update({ status_id: statusId }).eq("id", clientId);
 	if (updateError) throw updateError;
+	return getClientById(supabase, clientId);
+}
+
+/** Both fields are simple manually-entered values (PRD §11), not derived from any metric or external source. */
+export async function updatePaidAdsSettings(
+	supabase: SupabaseClient,
+	clientId: string,
+	input: { adSpendPerMonth: number | null; goLiveDate: string | null },
+): Promise<ClientRow | null> {
+	const { error } = await supabase
+		.from("clients")
+		.update({ ad_spend_per_month: input.adSpendPerMonth, paid_ads_go_live_date: input.goLiveDate })
+		.eq("id", clientId);
+	if (error) throw error;
 	return getClientById(supabase, clientId);
 }
 

@@ -5,18 +5,21 @@ import Layout from "../../layouts/Layout.astro";
 import { env } from "cloudflare:workers";
 import { createSupabaseClient } from "../../server/supabase";
 import { listMonthlyMetrics } from "../../server/data/monthlyMetrics";
+import { listPaidAdsMetrics } from "../../server/data/paidAdsMetrics";
 import { renderMetricAdminPanel } from "../../server/render/metricAdminPanel";
 
 const supabase = createSupabaseClient(env);
-const metrics = await listMonthlyMetrics(supabase);
-const panelHtml = (await renderMetricAdminPanel(metrics)).toString();
+const [monthlyMetrics, paidAdsMetrics] = await Promise.all([listMonthlyMetrics(supabase), listPaidAdsMetrics(supabase)]);
+const monthlyPanelHtml = (await renderMetricAdminPanel("monthly", monthlyMetrics)).toString();
+const paidAdsPanelHtml = (await renderMetricAdminPanel("paid_ads", paidAdsMetrics)).toString();
 ---
 
 <Layout title="Metrics">
 	<main class="mx-auto max-w-3xl px-6 py-10">
 		<a href="/" class="text-[13px] font-medium text-link hover:underline">&larr; All clients</a>
-		<div class="mt-4">
-			<Fragment set:html={panelHtml} />
+		<div class="mt-4 flex flex-col gap-4">
+			<Fragment set:html={monthlyPanelHtml} />
+			<Fragment set:html={paidAdsPanelHtml} />
 		</div>
 	</main>
 </Layout>

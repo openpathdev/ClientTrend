@@ -4,11 +4,13 @@ import { createSupabaseClient } from "./supabase";
 import { listStatuses } from "./data/statuses";
 import { listCsms } from "./data/csms";
 import { listStates } from "./data/states";
-import { listClients, updateClientStatus, updateGeneralNotes, getClientById } from "./data/clients";
+import { listClients, updateClientStatus, updateGeneralNotes, updatePaidAdsSettings, getClientById } from "./data/clients";
 import { listChanges, createChange, updateChange, deleteChange } from "./data/changes";
 import { listLinks, createLink, updateLink, deleteLink } from "./data/links";
 import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
 import { upsertMonthlyDataValue } from "./data/monthlyData";
+import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
+import { upsertPaidAdsDataValue } from "./data/paidAdsData";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { renderOverviewPanel } from "./render/overviewPanel";
 import { renderClientCard } from "./render/card";
@@ -19,6 +21,7 @@ import { renderLinksSection } from "./render/linksSection";
 import { renderMetricCell } from "./render/monthlyDataTable";
 import { renderCommentPanel } from "./render/commentPanel";
 import { renderMetricAdminPanel } from "./render/metricAdminPanel";
+import { renderPaidAdsSettings } from "./render/paidAdsSettings";
 import { isValidLinkUrl, validateLength, parseMonthlyCellValue } from "./validation";
 import { CHANGE_CATEGORIES, type ChangeCategory, type ClientFilters, type CommentSection, type MonthlyMetricValueType } from "./data/types";
 
@@ -264,7 +267,88 @@ app.put("/api/clients/:id/monthly-data/:metricId/:month", async (c) => {
 	return c.html(renderMetricCell(clientId, metric, month, saved, bgClass));
 });
 
-// ---- Comments (PRD §12), shared by Monthly Data now and Paid Ads in Phase 5 ----
+// ---- Paid Ads (PRD §11) — same metric/value pattern as Monthly Data, separate tables ----
+
+app.put("/api/clients/:id/paid-ads/:metricId/:month", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const metricId = c.req.param("metricId");
+	const month = c.req.param("month");
+
+	const metrics = await listPaidAdsMetrics(supabase);
+	const metricIndex = metrics.findIndex((m) => m.id === metricId);
+	const metric = metrics[metricIndex];
+	if (!metric) return c.text("Unknown metric", 404);
+	if (metric.source === "hubspot") return c.text("This metric is read-only", 400);
+
+	const body = await c.req.parseBody();
+	const raw = typeof body.value === "string" ? body.value : "";
+	const parsed = parseMonthlyCellValue(raw, metric.valueType, metric.minValue, metric.maxValue);
+	const bgClass = metricIndex % 2 === 0 ? "bg-surface" : "bg-zebra-row";
+
+	if (!parsed.ok) {
+		return c.html(
+			renderMetricCell(
+				clientId,
+				metric,
+				month,
+				{ id: "", clientId, metricId, month, value: null, valueText: raw, updatedBy: null, updatedAt: "" },
+				bgClass,
+			),
+			400,
+		);
+	}
+
+	const updatedBy = c.get("userEmail");
+	await upsertPaidAdsDataValue(supabase, {
+		clientId,
+		metricId,
+		month,
+		value: parsed.value,
+		valueText: parsed.valueText,
+		updatedBy,
+	});
+
+	const saved = {
+		id: "",
+		clientId,
+		metricId,
+		month,
+		value: parsed.value,
+		valueText: parsed.valueText,
+		updatedBy,
+		updatedAt: new Date().toISOString(),
+	};
+	return c.html(renderMetricCell(clientId, metric, month, saved, bgClass));
+});
+
+/** Go-live date + ad spend/mo — simple manually-entered client fields, not derived from any metric (PRD §11). */
+app.patch("/api/clients/:id/paid-ads-settings", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const client = await getClientById(supabase, clientId);
+	if (!client) return c.text("Client not found", 404);
+
+	const body = await c.req.parseBody();
+	const goLiveRaw = typeof body.goLiveDate === "string" ? body.goLiveDate.trim() : "";
+	const spendRaw = typeof body.adSpendPerMonth === "string" ? body.adSpendPerMonth.trim() : "";
+
+	const goLiveDate = goLiveRaw === "" ? null : goLiveRaw;
+	let adSpendPerMonth: number | null = null;
+	if (spendRaw !== "") {
+		const parsed = Number(spendRaw);
+		if (!Number.isFinite(parsed) || parsed < 0) {
+			return c.html(renderPaidAdsSettings(client, "Ad spend must be a non-negative number."), 400);
+		}
+		adSpendPerMonth = parsed;
+	}
+
+	const updated = await updatePaidAdsSettings(supabase, clientId, { adSpendPerMonth, goLiveDate });
+	if (!updated) return c.text("Client not found", 404);
+	return c.html(renderPaidAdsSettings(updated));
+});
+
+// ---- Comments (PRD §12), shared by Monthly Data and Paid Ads ----
 
 function readSection(value: unknown): CommentSection {
 	return value === "paid_ads" ? "paid_ads" : "monthly_data";
@@ -330,14 +414,16 @@ app.delete("/api/clients/:id/comments/:commentId", async (c) => {
 
 // ---- Metric catalog admin (PRD §20) ----
 
+function readMetricValueType(value: unknown): MonthlyMetricValueType {
+	return value === "integer" || value === "percent" ? value : "text";
+}
+
 app.post("/api/admin/monthly-metrics", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const body = await c.req.parseBody();
 	const key = typeof body.key === "string" ? body.key.trim() : "";
 	const label = typeof body.label === "string" ? body.label.trim() : "";
-	const valueTypeRaw = typeof body.valueType === "string" ? body.valueType : "text";
-	const valueType: MonthlyMetricValueType =
-		valueTypeRaw === "integer" || valueTypeRaw === "percent" ? valueTypeRaw : "text";
+	const valueType = readMetricValueType(body.valueType);
 
 	const metrics = await listMonthlyMetrics(supabase);
 	const keyValid = /^[a-z0-9_]+$/.test(key);
@@ -347,12 +433,35 @@ app.post("/api/admin/monthly-metrics", async (c) => {
 		const error = keyTaken
 			? "That key is already in use."
 			: "Key must be lowercase letters, numbers, and underscores; label is required.";
-		return c.html(renderMetricAdminPanel(metrics, error), 400);
+		return c.html(renderMetricAdminPanel("monthly", metrics, error), 400);
 	}
 
 	const nextSortOrder = metrics.reduce((max, m) => Math.max(max, m.sortOrder), 0) + 1;
 	await createMonthlyMetric(supabase, { key, label, valueType, sortOrder: nextSortOrder });
-	return c.html(renderMetricAdminPanel(await listMonthlyMetrics(supabase)));
+	return c.html(renderMetricAdminPanel("monthly", await listMonthlyMetrics(supabase)));
+});
+
+app.post("/api/admin/paid-ads-metrics", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const body = await c.req.parseBody();
+	const key = typeof body.key === "string" ? body.key.trim() : "";
+	const label = typeof body.label === "string" ? body.label.trim() : "";
+	const valueType = readMetricValueType(body.valueType);
+
+	const metrics = await listPaidAdsMetrics(supabase);
+	const keyValid = /^[a-z0-9_]+$/.test(key);
+	const keyTaken = metrics.some((m) => m.key === key);
+
+	if (!keyValid || keyTaken || !validateLength(label, 1, 200)) {
+		const error = keyTaken
+			? "That key is already in use."
+			: "Key must be lowercase letters, numbers, and underscores; label is required.";
+		return c.html(renderMetricAdminPanel("paid_ads", metrics, error), 400);
+	}
+
+	const nextSortOrder = metrics.reduce((max, m) => Math.max(max, m.sortOrder), 0) + 1;
+	await createPaidAdsMetric(supabase, { key, label, valueType, sortOrder: nextSortOrder });
+	return c.html(renderMetricAdminPanel("paid_ads", await listPaidAdsMetrics(supabase)));
 });
 
 export default app;

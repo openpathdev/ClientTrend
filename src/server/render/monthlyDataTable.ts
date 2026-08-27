@@ -129,13 +129,18 @@ export function renderMonthlyDataTable(params: {
 	months: string[];
 	values: MonthlyDataValue[];
 	commentCounts: Map<string, number>;
+	/** Extra content next to the title — used by Paid Ads for the GO-LIVE/AD SPEND chips (PRD §11); Monthly Data leaves this unset. */
+	headerExtra?: ReturnType<typeof html>;
 }) {
-	const { clientId, section, title, metrics, months, values, commentCounts } = params;
+	const { clientId, section, title, metrics, months, values, commentCounts, headerExtra } = params;
 	const byKey = new Map(values.map((v) => [valueKey(v.metricId, v.month), v]));
 
 	return html`<section id="${section}-section" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
 		<div class="flex items-center justify-between">
-			<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>
+			<div class="flex items-center gap-3">
+				<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>
+				${headerExtra ?? ""}
+			</div>
 			<span class="font-mono text-[11px] text-muted">Last ${String(months.length)} months</span>
 		</div>
 

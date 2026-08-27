@@ -10,6 +10,8 @@ import { listChanges } from "../../server/data/changes";
 import { listLinks } from "../../server/data/links";
 import { listMonthlyMetrics } from "../../server/data/monthlyMetrics";
 import { listMonthlyDataValues } from "../../server/data/monthlyData";
+import { listPaidAdsMetrics } from "../../server/data/paidAdsMetrics";
+import { listPaidAdsDataValues } from "../../server/data/paidAdsData";
 import { getCommentCounts } from "../../server/data/comments";
 import { trailingMonths, DEFAULT_MONTH_WINDOW } from "../../server/months";
 import { renderClientHeader } from "../../server/render/clientHeader";
@@ -17,6 +19,7 @@ import { renderNotesSection } from "../../server/render/notesSection";
 import { renderChangesSection } from "../../server/render/changesSection";
 import { renderLinksSection } from "../../server/render/linksSection";
 import { renderMonthlyDataTable } from "../../server/render/monthlyDataTable";
+import { renderPaidAdsSettings } from "../../server/render/paidAdsSettings";
 
 const { id } = Astro.params;
 const supabase = createSupabaseClient(env);
@@ -31,17 +34,23 @@ let notesHtml = "";
 let changesHtml = "";
 let linksHtml = "";
 let monthlyDataHtml = "";
+let paidAdsHtml = "";
 
 if (client) {
 	const months = trailingMonths(DEFAULT_MONTH_WINDOW);
-	const [statuses, changes, links, metrics, values, commentCounts] = await Promise.all([
-		listStatuses(supabase),
-		listChanges(supabase, client.id),
-		listLinks(supabase, client.id),
-		listMonthlyMetrics(supabase),
-		listMonthlyDataValues(supabase, client.id, months[0], months[months.length - 1]),
-		getCommentCounts(supabase, client.id, "monthly_data", months[0], months[months.length - 1]),
-	]);
+	const [statuses, changes, links, monthlyMetrics, monthlyValues, monthlyCommentCounts, paidAdsMetrics, paidAdsValues, paidAdsCommentCounts] =
+		await Promise.all([
+			listStatuses(supabase),
+			listChanges(supabase, client.id),
+			listLinks(supabase, client.id),
+			listMonthlyMetrics(supabase),
+			listMonthlyDataValues(supabase, client.id, months[0], months[months.length - 1]),
+			getCommentCounts(supabase, client.id, "monthly_data", months[0], months[months.length - 1]),
+			listPaidAdsMetrics(supabase),
+			listPaidAdsDataValues(supabase, client.id, months[0], months[months.length - 1]),
+			getCommentCounts(supabase, client.id, "paid_ads", months[0], months[months.length - 1]),
+		]);
+
 	headerHtml = (await renderClientHeader(client, statuses)).toString();
 	notesHtml = (await renderNotesSection(client)).toString();
 	changesHtml = (await renderChangesSection(client.id, changes)).toString();
@@ -51,10 +60,22 @@ if (client) {
 			clientId: client.id,
 			section: "monthly_data",
 			title: "Performance",
-			metrics,
+			metrics: monthlyMetrics,
 			months,
-			values,
-			commentCounts,
+			values: monthlyValues,
+			commentCounts: monthlyCommentCounts,
+		})
+	).toString();
+	paidAdsHtml = (
+		await renderMonthlyDataTable({
+			clientId: client.id,
+			section: "paid_ads",
+			title: "Paid Ads",
+			metrics: paidAdsMetrics,
+			months,
+			values: paidAdsValues,
+			commentCounts: paidAdsCommentCounts,
+			headerExtra: await renderPaidAdsSettings(client),
 		})
 	).toString();
 }
@@ -78,6 +99,7 @@ if (client) {
 						</div>
 					</div>
 					<Fragment set:html={monthlyDataHtml} />
+					<Fragment set:html={paidAdsHtml} />
 				</div>
 			) : (
 				<div class="mt-6 rounded-2xl border border-dashed border-card-border bg-surface p-10 text-center">

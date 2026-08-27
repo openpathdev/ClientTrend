@@ -103,6 +103,8 @@ export type MonthlyDataValue = {
 	month: string; // YYYY-MM-DD, always first-of-month
 	value: number | null;
 	valueText: string | null;
+	/** Per-cell highlight annotation — FK to statuses.id, independent of the client's own status. */
+	statusId: string | null;
 	updatedBy: string | null;
 	updatedAt: string;
 };
@@ -117,6 +119,8 @@ export type Comment = {
 	id: string;
 	clientId: string;
 	section: CommentSection;
+	/** The specific cell this comment belongs to (PRD §12 — per-cell, not per-month). */
+	metricId: string;
 	month: string;
 	body: string;
 	createdBy: string;

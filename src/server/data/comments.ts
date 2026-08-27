@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Comment, CommentSection } from "./types";
+import { cellKey } from "../cellKey";
 
 type CommentRow = {
 	id: string;
 	client_id: string;
 	section: CommentSection;
+	metric_id: string;
 	month: string;
 	body: string;
 	created_by: string;
@@ -18,6 +20,7 @@ function mapComment(row: CommentRow): Comment {
 		id: row.id,
 		clientId: row.client_id,
 		section: row.section,
+		metricId: row.metric_id,
 		month: row.month,
 		body: row.body,
 		createdBy: row.created_by,
@@ -27,10 +30,12 @@ function mapComment(row: CommentRow): Comment {
 	};
 }
 
+/** Comments for one specific cell (client, section, metric, month) — PRD §12 per-cell model. */
 export async function listComments(
 	supabase: SupabaseClient,
 	clientId: string,
 	section: CommentSection,
+	metricId: string,
 	month: string,
 ): Promise<Comment[]> {
 	const { data, error } = await supabase
@@ -38,42 +43,50 @@ export async function listComments(
 		.select("*")
 		.eq("client_id", clientId)
 		.eq("section", section)
+		.eq("metric_id", metricId)
 		.eq("month", month)
 		.order("created_at", { ascending: false });
 	if (error) throw error;
 	return (data as CommentRow[]).map(mapComment);
 }
 
-/** Comment counts per month, for the month-header indicator badges (PRD §12). */
-export async function getCommentCounts(
+/**
+ * All comments for a client+section across a month range, grouped per cell —
+ * one bulk fetch feeding both the per-cell flag badge and its hover-preview
+ * text, so hovering a cell never needs a network round trip (PRD §12).
+ */
+export async function listCommentsForRange(
 	supabase: SupabaseClient,
 	clientId: string,
 	section: CommentSection,
 	startMonth: string,
 	endMonth: string,
-): Promise<Map<string, number>> {
+): Promise<Map<string, Comment[]>> {
 	const { data, error } = await supabase
 		.from("comments")
-		.select("month")
+		.select("*")
 		.eq("client_id", clientId)
 		.eq("section", section)
 		.gte("month", startMonth)
-		.lte("month", endMonth);
+		.lte("month", endMonth)
+		.order("created_at", { ascending: false });
 	if (error) throw error;
-	const counts = new Map<string, number>();
-	for (const row of data as { month: string }[]) {
-		counts.set(row.month, (counts.get(row.month) ?? 0) + 1);
+	const byCell = new Map<string, Comment[]>();
+	for (const row of (data as CommentRow[]).map(mapComment)) {
+		const key = cellKey(row.metricId, row.month);
+		byCell.set(key, [...(byCell.get(key) ?? []), row]);
 	}
-	return counts;
+	return byCell;
 }
 
 export async function createComment(
 	supabase: SupabaseClient,
-	input: { clientId: string; section: CommentSection; month: string; body: string; createdBy: string },
+	input: { clientId: string; section: CommentSection; metricId: string; month: string; body: string; createdBy: string },
 ): Promise<void> {
 	const { error } = await supabase.from("comments").insert({
 		client_id: input.clientId,
 		section: input.section,
+		metric_id: input.metricId,
 		month: input.month,
 		body: input.body,
 		created_by: input.createdBy,

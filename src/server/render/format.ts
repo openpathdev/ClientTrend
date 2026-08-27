@@ -15,6 +15,10 @@ export function formatPercent(value: number | null): string {
 	return `${value}%`;
 }
 
+export function truncate(value: string, max: number): string {
+	return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
 /** Display form of a website: strip protocol/www, keep the bare domain. */
 export function displayWebsite(website: string | null): string {
 	if (!website) return EMPTY;

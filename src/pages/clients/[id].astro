@@ -12,7 +12,7 @@ import { listMonthlyMetrics } from "../../server/data/monthlyMetrics";
 import { listMonthlyDataValues } from "../../server/data/monthlyData";
 import { listPaidAdsMetrics } from "../../server/data/paidAdsMetrics";
 import { listPaidAdsDataValues } from "../../server/data/paidAdsData";
-import { getCommentCounts } from "../../server/data/comments";
+import { listCommentsForRange } from "../../server/data/comments";
 import { trailingMonths, DEFAULT_MONTH_WINDOW } from "../../server/months";
 import { renderClientHeader } from "../../server/render/clientHeader";
 import { renderNotesSection } from "../../server/render/notesSection";
@@ -38,17 +38,17 @@ let paidAdsHtml = "";
 
 if (client) {
 	const months = trailingMonths(DEFAULT_MONTH_WINDOW);
-	const [statuses, changes, links, monthlyMetrics, monthlyValues, monthlyCommentCounts, paidAdsMetrics, paidAdsValues, paidAdsCommentCounts] =
+	const [statuses, changes, links, monthlyMetrics, monthlyValues, monthlyComments, paidAdsMetrics, paidAdsValues, paidAdsComments] =
 		await Promise.all([
 			listStatuses(supabase),
 			listChanges(supabase, client.id),
 			listLinks(supabase, client.id),
 			listMonthlyMetrics(supabase),
 			listMonthlyDataValues(supabase, client.id, months[0], months[months.length - 1]),
-			getCommentCounts(supabase, client.id, "monthly_data", months[0], months[months.length - 1]),
+			listCommentsForRange(supabase, client.id, "monthly_data", months[0], months[months.length - 1]),
 			listPaidAdsMetrics(supabase),
 			listPaidAdsDataValues(supabase, client.id, months[0], months[months.length - 1]),
-			getCommentCounts(supabase, client.id, "paid_ads", months[0], months[months.length - 1]),
+			listCommentsForRange(supabase, client.id, "paid_ads", months[0], months[months.length - 1]),
 		]);
 
 	headerHtml = (await renderClientHeader(client, statuses)).toString();
@@ -63,7 +63,8 @@ if (client) {
 			metrics: monthlyMetrics,
 			months,
 			values: monthlyValues,
-			commentCounts: monthlyCommentCounts,
+			statuses,
+			comments: monthlyComments,
 		})
 	).toString();
 	paidAdsHtml = (
@@ -74,7 +75,8 @@ if (client) {
 			metrics: paidAdsMetrics,
 			months,
 			values: paidAdsValues,
-			commentCounts: paidAdsCommentCounts,
+			statuses,
+			comments: paidAdsComments,
 			headerExtra: await renderPaidAdsSettings(client),
 		})
 	).toString();

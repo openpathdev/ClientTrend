@@ -8,6 +8,7 @@ type ValueRow = {
 	month: string;
 	value: number | null;
 	value_text: string | null;
+	status_id: string | null;
 	updated_by: string | null;
 	updated_at: string;
 };
@@ -20,6 +21,7 @@ function mapValue(row: ValueRow): MonthlyDataValue {
 		month: row.month,
 		value: row.value,
 		valueText: row.value_text,
+		statusId: row.status_id,
 		updatedBy: row.updated_by,
 		updatedAt: row.updated_at,
 	};
@@ -42,6 +44,25 @@ export async function listMonthlyDataValues(
 	return (data as ValueRow[]).map(mapValue);
 }
 
+/** Single cell read — used by the value-PUT route's invalid-input path so a redisplayed cell keeps its true highlight/comment state. */
+export async function getMonthlyDataValue(
+	supabase: SupabaseClient,
+	clientId: string,
+	metricId: string,
+	month: string,
+): Promise<MonthlyDataValue | null> {
+	const { data, error } = await supabase
+		.from("monthly_data_values")
+		.select("*")
+		.eq("client_id", clientId)
+		.eq("metric_id", metricId)
+		.eq("month", month)
+		.maybeSingle();
+	if (error) throw error;
+	return data ? mapValue(data as ValueRow) : null;
+}
+
+/** Upserts a cell's value; returns the resulting row so callers see its true statusId (never touched here) rather than guessing. */
 export async function upsertMonthlyDataValue(
 	supabase: SupabaseClient,
 	input: {
@@ -52,17 +73,39 @@ export async function upsertMonthlyDataValue(
 		valueText: string | null;
 		updatedBy: string;
 	},
-): Promise<void> {
-	const { error } = await supabase.from("monthly_data_values").upsert(
-		{
-			client_id: input.clientId,
-			metric_id: input.metricId,
-			month: input.month,
-			value: input.value,
-			value_text: input.valueText,
-			updated_by: input.updatedBy,
-		},
-		{ onConflict: "client_id,metric_id,month" },
-	);
+): Promise<MonthlyDataValue> {
+	const { data, error } = await supabase
+		.from("monthly_data_values")
+		.upsert(
+			{
+				client_id: input.clientId,
+				metric_id: input.metricId,
+				month: input.month,
+				value: input.value,
+				value_text: input.valueText,
+				updated_by: input.updatedBy,
+			},
+			{ onConflict: "client_id,metric_id,month" },
+		)
+		.select()
+		.single();
 	if (error) throw error;
+	return mapValue(data as ValueRow);
+}
+
+/** Sets (or clears, with statusId=null) a cell's highlight only — value/value_text/updated_by are left untouched. */
+export async function setMonthlyDataValueStatus(
+	supabase: SupabaseClient,
+	input: { clientId: string; metricId: string; month: string; statusId: string | null },
+): Promise<MonthlyDataValue> {
+	const { data, error } = await supabase
+		.from("monthly_data_values")
+		.upsert(
+			{ client_id: input.clientId, metric_id: input.metricId, month: input.month, status_id: input.statusId },
+			{ onConflict: "client_id,metric_id,month" },
+		)
+		.select()
+		.single();
+	if (error) throw error;
+	return mapValue(data as ValueRow);
 }

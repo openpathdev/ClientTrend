@@ -14,26 +14,27 @@ function renderLinkItem(clientId: string, link: Link) {
 			${link.description ? html`<p class="mt-1 whitespace-pre-wrap text-[13px] text-ink">${link.description}</p>` : ""}
 			<div class="mt-1.5 flex items-center gap-3">
 				<button type="button" x-on:click="editing = true" class="text-[11.5px] font-medium text-link hover:underline">Edit</button>
-				<template x-if="!confirming">
-					<button type="button" x-on:click="confirming = true" class="text-[11.5px] font-medium text-needs-attention-text hover:underline">
-						Delete
+				<button
+					type="button"
+					x-show="!confirming"
+					x-on:click="confirming = true"
+					class="text-[11.5px] font-medium text-needs-attention-text hover:underline"
+				>
+					Delete
+				</button>
+				<span x-show="confirming" x-cloak class="flex items-center gap-2 text-[11.5px]">
+					<span class="text-muted">Delete this link?</span>
+					<button
+						type="button"
+						hx-delete="/api/clients/${clientId}/links/${link.id}"
+						hx-target="#links-section"
+						hx-swap="outerHTML"
+						class="font-medium text-needs-attention-text hover:underline"
+					>
+						Yes, delete
 					</button>
-				</template>
-				<template x-if="confirming">
-					<span class="flex items-center gap-2 text-[11.5px]">
-						<span class="text-muted">Delete this link?</span>
-						<button
-							type="button"
-							hx-delete="/api/clients/${clientId}/links/${link.id}"
-							hx-target="#links-section"
-							hx-swap="outerHTML"
-							class="font-medium text-needs-attention-text hover:underline"
-						>
-							Yes, delete
-						</button>
-						<button type="button" x-on:click="confirming = false" class="font-medium text-muted hover:underline">Cancel</button>
-					</span>
-				</template>
+					<button type="button" x-on:click="confirming = false" class="font-medium text-muted hover:underline">Cancel</button>
+				</span>
 			</div>
 		</div>
 		<form

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { html } from "hono/html";
 import type { AppEnv } from "./bindings";
 import { createSupabaseClient } from "./supabase";
 import { listStatuses } from "./data/statuses";
@@ -8,9 +9,9 @@ import { listClients, updateClientStatus, updateGeneralNotes, updatePaidAdsSetti
 import { listChanges, createChange, updateChange, deleteChange } from "./data/changes";
 import { listLinks, createLink, updateLink, deleteLink } from "./data/links";
 import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
-import { upsertMonthlyDataValue } from "./data/monthlyData";
+import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus } from "./data/monthlyData";
 import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
-import { upsertPaidAdsDataValue } from "./data/paidAdsData";
+import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus } from "./data/paidAdsData";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { renderOverviewPanel } from "./render/overviewPanel";
 import { renderClientCard } from "./render/card";
@@ -18,8 +19,8 @@ import { renderClientHeader } from "./render/clientHeader";
 import { renderNotesSection } from "./render/notesSection";
 import { renderChangesSection } from "./render/changesSection";
 import { renderLinksSection } from "./render/linksSection";
-import { renderMetricCell } from "./render/monthlyDataTable";
-import { renderCommentPanel } from "./render/commentPanel";
+import { renderMetricCell, renderCellMarkerButton } from "./render/monthlyDataTable";
+import { renderCommentPopover } from "./render/commentPanel";
 import { renderMetricAdminPanel } from "./render/metricAdminPanel";
 import { renderPaidAdsSettings } from "./render/paidAdsSettings";
 import { isValidLinkUrl, validateLength, parseMonthlyCellValue } from "./validation";
@@ -220,7 +221,7 @@ app.put("/api/clients/:id/monthly-data/:metricId/:month", async (c) => {
 	const metricId = c.req.param("metricId");
 	const month = c.req.param("month");
 
-	const metrics = await listMonthlyMetrics(supabase);
+	const [metrics, statuses] = await Promise.all([listMonthlyMetrics(supabase), listStatuses(supabase)]);
 	const metricIndex = metrics.findIndex((m) => m.id === metricId);
 	const metric = metrics[metricIndex];
 	if (!metric) return c.text("Unknown metric", 404);
@@ -232,20 +233,27 @@ app.put("/api/clients/:id/monthly-data/:metricId/:month", async (c) => {
 	const bgClass = metricIndex % 2 === 0 ? "bg-surface" : "bg-zebra-row";
 
 	if (!parsed.ok) {
+		const current = await getMonthlyDataValue(supabase, clientId, metricId, month);
+		const status = current?.statusId ? (statuses.find((s) => s.id === current.statusId) ?? null) : null;
+		const cellComments = await listComments(supabase, clientId, "monthly_data", metricId, month);
 		return c.html(
 			renderMetricCell(
 				clientId,
+				"monthly_data",
 				metric,
 				month,
-				{ id: "", clientId, metricId, month, value: null, valueText: raw, updatedBy: null, updatedAt: "" },
+				{ id: current?.id ?? "", clientId, metricId, month, value: null, valueText: raw, statusId: current?.statusId ?? null, updatedBy: null, updatedAt: "" },
 				bgClass,
+				status,
+				statuses,
+				cellComments,
 			),
 			400,
 		);
 	}
 
 	const updatedBy = c.get("userEmail");
-	await upsertMonthlyDataValue(supabase, {
+	const saved = await upsertMonthlyDataValue(supabase, {
 		clientId,
 		metricId,
 		month,
@@ -254,17 +262,32 @@ app.put("/api/clients/:id/monthly-data/:metricId/:month", async (c) => {
 		updatedBy,
 	});
 
-	const saved = {
-		id: "",
-		clientId,
-		metricId,
-		month,
-		value: parsed.value,
-		valueText: parsed.valueText,
-		updatedBy,
-		updatedAt: new Date().toISOString(),
-	};
-	return c.html(renderMetricCell(clientId, metric, month, saved, bgClass));
+	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
+	const cellComments = await listComments(supabase, clientId, "monthly_data", metricId, month);
+	return c.html(renderMetricCell(clientId, "monthly_data", metric, month, saved, bgClass, status, statuses, cellComments));
+});
+
+app.patch("/api/clients/:id/monthly-data/:metricId/:month/highlight", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const metricId = c.req.param("metricId");
+	const month = c.req.param("month");
+
+	const [metrics, statuses] = await Promise.all([listMonthlyMetrics(supabase), listStatuses(supabase)]);
+	const metricIndex = metrics.findIndex((m) => m.id === metricId);
+	const metric = metrics[metricIndex];
+	if (!metric) return c.text("Unknown metric", 404);
+
+	const body = await c.req.parseBody();
+	const raw = typeof body.statusId === "string" ? body.statusId : "";
+	const statusId = raw === "" ? null : raw;
+	if (statusId !== null && !statuses.some((s) => s.id === statusId)) return c.text("Unknown status", 400);
+
+	const saved = await setMonthlyDataValueStatus(supabase, { clientId, metricId, month, statusId });
+	const bgClass = metricIndex % 2 === 0 ? "bg-surface" : "bg-zebra-row";
+	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
+	const cellComments = await listComments(supabase, clientId, "monthly_data", metricId, month);
+	return c.html(renderMetricCell(clientId, "monthly_data", metric, month, saved, bgClass, status, statuses, cellComments));
 });
 
 // ---- Paid Ads (PRD §11) — same metric/value pattern as Monthly Data, separate tables ----
@@ -275,7 +298,7 @@ app.put("/api/clients/:id/paid-ads/:metricId/:month", async (c) => {
 	const metricId = c.req.param("metricId");
 	const month = c.req.param("month");
 
-	const metrics = await listPaidAdsMetrics(supabase);
+	const [metrics, statuses] = await Promise.all([listPaidAdsMetrics(supabase), listStatuses(supabase)]);
 	const metricIndex = metrics.findIndex((m) => m.id === metricId);
 	const metric = metrics[metricIndex];
 	if (!metric) return c.text("Unknown metric", 404);
@@ -287,20 +310,27 @@ app.put("/api/clients/:id/paid-ads/:metricId/:month", async (c) => {
 	const bgClass = metricIndex % 2 === 0 ? "bg-surface" : "bg-zebra-row";
 
 	if (!parsed.ok) {
+		const current = await getPaidAdsDataValue(supabase, clientId, metricId, month);
+		const status = current?.statusId ? (statuses.find((s) => s.id === current.statusId) ?? null) : null;
+		const cellComments = await listComments(supabase, clientId, "paid_ads", metricId, month);
 		return c.html(
 			renderMetricCell(
 				clientId,
+				"paid_ads",
 				metric,
 				month,
-				{ id: "", clientId, metricId, month, value: null, valueText: raw, updatedBy: null, updatedAt: "" },
+				{ id: current?.id ?? "", clientId, metricId, month, value: null, valueText: raw, statusId: current?.statusId ?? null, updatedBy: null, updatedAt: "" },
 				bgClass,
+				status,
+				statuses,
+				cellComments,
 			),
 			400,
 		);
 	}
 
 	const updatedBy = c.get("userEmail");
-	await upsertPaidAdsDataValue(supabase, {
+	const saved = await upsertPaidAdsDataValue(supabase, {
 		clientId,
 		metricId,
 		month,
@@ -309,17 +339,32 @@ app.put("/api/clients/:id/paid-ads/:metricId/:month", async (c) => {
 		updatedBy,
 	});
 
-	const saved = {
-		id: "",
-		clientId,
-		metricId,
-		month,
-		value: parsed.value,
-		valueText: parsed.valueText,
-		updatedBy,
-		updatedAt: new Date().toISOString(),
-	};
-	return c.html(renderMetricCell(clientId, metric, month, saved, bgClass));
+	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
+	const cellComments = await listComments(supabase, clientId, "paid_ads", metricId, month);
+	return c.html(renderMetricCell(clientId, "paid_ads", metric, month, saved, bgClass, status, statuses, cellComments));
+});
+
+app.patch("/api/clients/:id/paid-ads/:metricId/:month/highlight", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const metricId = c.req.param("metricId");
+	const month = c.req.param("month");
+
+	const [metrics, statuses] = await Promise.all([listPaidAdsMetrics(supabase), listStatuses(supabase)]);
+	const metricIndex = metrics.findIndex((m) => m.id === metricId);
+	const metric = metrics[metricIndex];
+	if (!metric) return c.text("Unknown metric", 404);
+
+	const body = await c.req.parseBody();
+	const raw = typeof body.statusId === "string" ? body.statusId : "";
+	const statusId = raw === "" ? null : raw;
+	if (statusId !== null && !statuses.some((s) => s.id === statusId)) return c.text("Unknown status", 400);
+
+	const saved = await setPaidAdsDataValueStatus(supabase, { clientId, metricId, month, statusId });
+	const bgClass = metricIndex % 2 === 0 ? "bg-surface" : "bg-zebra-row";
+	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
+	const cellComments = await listComments(supabase, clientId, "paid_ads", metricId, month);
+	return c.html(renderMetricCell(clientId, "paid_ads", metric, month, saved, bgClass, status, statuses, cellComments));
 });
 
 /** Go-live date + ad spend/mo — simple manually-entered client fields, not derived from any metric (PRD §11). */
@@ -354,13 +399,20 @@ function readSection(value: unknown): CommentSection {
 	return value === "paid_ads" ? "paid_ads" : "monthly_data";
 }
 
+/** Looks up the metric in the catalog matching `section` — this app-level check is what replaces the DB FK (comments.metric_id has none, PRD §12). */
+async function findMetric(supabase: ReturnType<typeof createSupabaseClient>, section: CommentSection, metricId: string) {
+	const metrics = section === "paid_ads" ? await listPaidAdsMetrics(supabase) : await listMonthlyMetrics(supabase);
+	return metrics.find((m) => m.id === metricId) ?? null;
+}
+
 app.get("/api/clients/:id/comments", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const clientId = c.req.param("id");
 	const section = readSection(c.req.query("section"));
+	const metricId = c.req.query("metricId") ?? "";
 	const month = c.req.query("month") ?? "";
-	const comments = await listComments(supabase, clientId, section, month);
-	return c.html(renderCommentPanel(clientId, section, month, comments));
+	const comments = await listComments(supabase, clientId, section, metricId, month);
+	return c.html(renderCommentPopover(clientId, section, metricId, month, comments));
 });
 
 app.post("/api/clients/:id/comments", async (c) => {
@@ -368,17 +420,21 @@ app.post("/api/clients/:id/comments", async (c) => {
 	const clientId = c.req.param("id");
 	const body = await c.req.parseBody();
 	const section = readSection(body.section);
+	const metricId = typeof body.metricId === "string" ? body.metricId : "";
 	const month = typeof body.month === "string" ? body.month : "";
 	const commentBody = typeof body.body === "string" ? body.body : "";
 
+	const metric = await findMetric(supabase, section, metricId);
+	if (!metric) return c.text("Unknown metric", 404);
+
 	if (!validateLength(commentBody, 1, 2000)) {
-		const comments = await listComments(supabase, clientId, section, month);
-		return c.html(renderCommentPanel(clientId, section, month, comments, "Comment must be 1-2,000 characters."), 400);
+		const comments = await listComments(supabase, clientId, section, metricId, month);
+		return c.html(renderCommentPopover(clientId, section, metricId, month, comments, "Comment must be 1-2,000 characters."), 400);
 	}
 
-	await createComment(supabase, { clientId, section, month, body: commentBody.trim(), createdBy: c.get("userEmail") });
-	const comments = await listComments(supabase, clientId, section, month);
-	return c.html(renderCommentPanel(clientId, section, month, comments));
+	await createComment(supabase, { clientId, section, metricId, month, body: commentBody.trim(), createdBy: c.get("userEmail") });
+	const comments = await listComments(supabase, clientId, section, metricId, month);
+	return c.html(html`${renderCellMarkerButton(clientId, section, metric, month, comments, true)}${renderCommentPopover(clientId, section, metricId, month, comments)}`);
 });
 
 app.patch("/api/clients/:id/comments/:commentId", async (c) => {
@@ -387,29 +443,37 @@ app.patch("/api/clients/:id/comments/:commentId", async (c) => {
 	const commentId = c.req.param("commentId");
 	const body = await c.req.parseBody();
 	const section = readSection(body.section);
+	const metricId = typeof body.metricId === "string" ? body.metricId : "";
 	const month = typeof body.month === "string" ? body.month : "";
 	const commentBody = typeof body.body === "string" ? body.body : "";
 
 	if (!validateLength(commentBody, 1, 2000)) {
-		const comments = await listComments(supabase, clientId, section, month);
-		return c.html(renderCommentPanel(clientId, section, month, comments, "Comment must be 1-2,000 characters."), 400);
+		const comments = await listComments(supabase, clientId, section, metricId, month);
+		return c.html(renderCommentPopover(clientId, section, metricId, month, comments, "Comment must be 1-2,000 characters."), 400);
 	}
 
 	await updateComment(supabase, commentId, commentBody.trim(), c.get("userEmail"));
-	const comments = await listComments(supabase, clientId, section, month);
-	return c.html(renderCommentPanel(clientId, section, month, comments));
+	const comments = await listComments(supabase, clientId, section, metricId, month);
+	const metric = await findMetric(supabase, section, metricId);
+	if (!metric) return c.text("Unknown metric", 404);
+	return c.html(html`${renderCellMarkerButton(clientId, section, metric, month, comments, true)}${renderCommentPopover(clientId, section, metricId, month, comments)}`);
 });
 
 app.delete("/api/clients/:id/comments/:commentId", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const clientId = c.req.param("id");
-	const body = await c.req.parseBody();
-	const section = readSection(body.section);
-	const month = typeof body.month === "string" ? body.month : "";
+	// htmx sends hx-vals for DELETE as URL query params, not a request body
+	// (its `methodsThatUseUrlParams` list includes "delete") — unlike the
+	// POST/PATCH comment routes above, which correctly read parseBody().
+	const section = readSection(c.req.query("section"));
+	const metricId = c.req.query("metricId") ?? "";
+	const month = c.req.query("month") ?? "";
 
 	await deleteComment(supabase, c.req.param("commentId"));
-	const comments = await listComments(supabase, clientId, section, month);
-	return c.html(renderCommentPanel(clientId, section, month, comments));
+	const comments = await listComments(supabase, clientId, section, metricId, month);
+	const metric = await findMetric(supabase, section, metricId);
+	if (!metric) return c.text("Unknown metric", 404);
+	return c.html(html`${renderCellMarkerButton(clientId, section, metric, month, comments, true)}${renderCommentPopover(clientId, section, metricId, month, comments)}`);
 });
 
 // ---- Metric catalog admin (PRD §20) ----

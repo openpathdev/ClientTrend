@@ -9,6 +9,7 @@ type MetricRow = {
 	min_value: number | null;
 	max_value: number | null;
 	source: MonthlyMetricSource;
+	group_label: string | null;
 	sort_order: number;
 	active: boolean;
 };
@@ -22,6 +23,7 @@ function mapMetric(row: MetricRow): PaidAdsMetric {
 		minValue: row.min_value,
 		maxValue: row.max_value,
 		source: row.source,
+		groupLabel: row.group_label,
 		sortOrder: row.sort_order,
 		active: row.active,
 	};

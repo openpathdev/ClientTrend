@@ -9,6 +9,7 @@ type MetricRow = {
 	min_value: number | null;
 	max_value: number | null;
 	source: MonthlyMetricSource;
+	group_label: string | null;
 	sort_order: number;
 	active: boolean;
 };
@@ -22,6 +23,7 @@ function mapMetric(row: MetricRow): MonthlyMetric {
 		minValue: row.min_value,
 		maxValue: row.max_value,
 		source: row.source,
+		groupLabel: row.group_label,
 		sortOrder: row.sort_order,
 		active: row.active,
 	};
@@ -39,13 +41,14 @@ export async function listMonthlyMetrics(supabase: SupabaseClient): Promise<Mont
 
 export async function createMonthlyMetric(
 	supabase: SupabaseClient,
-	input: { key: string; label: string; valueType: MonthlyMetricValueType; sortOrder: number },
+	input: { key: string; label: string; valueType: MonthlyMetricValueType; sortOrder: number; groupLabel: string | null },
 ): Promise<void> {
 	const { error } = await supabase.from("monthly_metrics").insert({
 		key: input.key,
 		label: input.label,
 		value_type: input.valueType,
 		sort_order: input.sortOrder,
+		group_label: input.groupLabel,
 		source: "manual",
 	});
 	if (error) throw error;

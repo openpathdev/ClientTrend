@@ -89,6 +89,8 @@ export type MonthlyMetric = {
 	minValue: number | null;
 	maxValue: number | null;
 	source: MonthlyMetricSource;
+	/** Section header this metric renders under (e.g. "Top of Funnel"); null means no header row (PRD §20). */
+	groupLabel: string | null;
 	sortOrder: number;
 	active: boolean;
 };

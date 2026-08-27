@@ -424,6 +424,7 @@ app.post("/api/admin/monthly-metrics", async (c) => {
 	const key = typeof body.key === "string" ? body.key.trim() : "";
 	const label = typeof body.label === "string" ? body.label.trim() : "";
 	const valueType = readMetricValueType(body.valueType);
+	const groupLabel = typeof body.groupLabel === "string" && body.groupLabel.trim() ? body.groupLabel.trim() : null;
 
 	const metrics = await listMonthlyMetrics(supabase);
 	const keyValid = /^[a-z0-9_]+$/.test(key);
@@ -437,7 +438,7 @@ app.post("/api/admin/monthly-metrics", async (c) => {
 	}
 
 	const nextSortOrder = metrics.reduce((max, m) => Math.max(max, m.sortOrder), 0) + 1;
-	await createMonthlyMetric(supabase, { key, label, valueType, sortOrder: nextSortOrder });
+	await createMonthlyMetric(supabase, { key, label, valueType, sortOrder: nextSortOrder, groupLabel });
 	return c.html(renderMetricAdminPanel("monthly", await listMonthlyMetrics(supabase)));
 });
 

@@ -71,6 +71,27 @@ function renderMonthHeader(clientId: string, section: CommentSection, month: str
 	</th>`;
 }
 
+/**
+ * Section header row (e.g. "Top of Funnel") — a distinct row inserted
+ * whenever `group_label` changes between consecutive metrics, ordered by
+ * sort_order (PRD §20). Only the sticky metric column carries the label;
+ * the month cells are blank filler with a matching background, so the
+ * label stays visible regardless of horizontal scroll position, same as
+ * the "Metric" header column itself — a full colspan banner would scroll
+ * out of view since the table defaults to scrolled-right (newest month).
+ */
+function renderGroupHeaderRow(groupLabel: string, monthCount: number) {
+	return html`<tr>
+		<th
+			scope="colgroup"
+			class="sticky left-0 z-10 whitespace-nowrap border-r border-row-rule bg-table-header px-3 py-1.5 text-left font-sans text-[11px] font-semibold uppercase tracking-[0.06em] text-label"
+		>
+			${groupLabel}
+		</th>
+		${Array.from({ length: monthCount }, () => html`<td class="bg-table-header"></td>`)}
+	</tr>`;
+}
+
 export function renderMetricCell(
 	clientId: string,
 	metric: MonthlyMetric,
@@ -158,18 +179,28 @@ export function renderMonthlyDataTable(params: {
 					</tr>
 				</thead>
 				<tbody>
-					${metrics.map((metric, i) => {
-						const bgClass = i % 2 === 0 ? "bg-surface" : "bg-zebra-row";
-						return html`<tr>
-							<th
-								scope="row"
-								class="sticky left-0 z-10 whitespace-nowrap border-r border-row-rule px-3 py-2 text-left font-sans text-[13px] font-normal text-ink ${bgClass}"
-							>
-								${metric.label}
-							</th>
-							${months.map((month) => renderMetricCell(clientId, metric, month, byKey.get(valueKey(metric.id, month)), bgClass))}
-						</tr>`;
-					})}
+					${(() => {
+						const rows: ReturnType<typeof html>[] = [];
+						let previousGroup: string | null = null;
+						metrics.forEach((metric, i) => {
+							if (metric.groupLabel && metric.groupLabel !== previousGroup) {
+								rows.push(renderGroupHeaderRow(metric.groupLabel, months.length));
+							}
+							previousGroup = metric.groupLabel;
+
+							const bgClass = i % 2 === 0 ? "bg-surface" : "bg-zebra-row";
+							rows.push(html`<tr>
+								<th
+									scope="row"
+									class="sticky left-0 z-10 whitespace-nowrap border-r border-row-rule px-3 py-2 text-left font-sans text-[13px] font-normal text-ink ${bgClass}"
+								>
+									${metric.label}
+								</th>
+								${months.map((month) => renderMetricCell(clientId, metric, month, byKey.get(valueKey(metric.id, month)), bgClass))}
+							</tr>`);
+						});
+						return rows;
+					})()}
 				</tbody>
 			</table>
 		</div>

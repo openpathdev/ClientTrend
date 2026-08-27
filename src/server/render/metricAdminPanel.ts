@@ -74,6 +74,20 @@ export function renderMetricAdminPanel(catalog: MetricCatalogType, metrics: Mont
 					<option value="percent">Percent</option>
 				</select>
 			</div>
+			${
+				catalog === "monthly"
+					? html`<div class="flex flex-col gap-1">
+							<label for="${catalog}-metric-group" class="text-[11px] uppercase tracking-[0.06em] text-label">Section (optional)</label>
+							<input
+								id="${catalog}-metric-group"
+								type="text"
+								name="groupLabel"
+								placeholder="e.g. Top of Funnel"
+								class="rounded-md border border-card-border px-2 py-1.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
+							/>
+						</div>`
+					: ""
+			}
 			<button type="submit" class="rounded-md bg-selected-filter px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90">
 				Add metric
 			</button>
@@ -82,7 +96,7 @@ export function renderMetricAdminPanel(catalog: MetricCatalogType, metrics: Mont
 		<div class="mt-4 divide-y divide-row-rule border-t border-row-rule">
 			${metrics.map(
 				(m) => html`<div class="flex items-center justify-between py-2 text-[13px]">
-					<span class="text-ink">${m.label}</span>
+					<span class="text-ink">${m.label}${m.groupLabel ? html`<span class="ml-2 text-[11px] text-muted">(${m.groupLabel})</span>` : ""}</span>
 					<span class="flex items-center gap-2 font-mono text-[11px] text-muted">
 						<span>${m.valueType}</span>
 						<span class="rounded-full bg-zebra-row px-2 py-0.5">${m.source}</span>

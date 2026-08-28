@@ -10,5 +10,5 @@ import app from "../../server/app";
  * into Hono's `c.env` rather than re-verifying the Access JWT here.
  */
 export const ALL: APIRoute = ({ request, locals }) => {
-	return app.fetch(request, { ...env, userEmail: locals.userEmail ?? null });
+	return app.fetch(request, { ...env, userEmail: locals.userEmail ?? null }, locals.cfContext);
 };

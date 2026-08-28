@@ -89,17 +89,9 @@ export type HubspotCompanyResult =
 	| { status: "ok"; properties: Record<string, string | null> }
 	| { status: "not_found" };
 
-const COMPANY_SYNC_PROPERTIES = [
-	"name",
-	"domain",
-	"service_area_population",
-	"domain_authority",
-	"csm",
-	"website___purchased_pro_website",
-	"website___purchased_base_website",
-];
+const COMPANY_SYNC_PROPERTIES = ["name", "domain", "service_area_population", "domain_authority", "csm"];
 
-/** Fetches the 5 simple, directly-mapped Company properties (PRD §14) — never `her_journey_org_data`, see scripts/sync_org_data.py for why that's handled separately. */
+/** Fetches the simple, directly-mapped Company properties (PRD §14) — never `her_journey_org_data`, see scripts/sync_org_data.py for why that's handled separately. Website product eligibility is NOT among these — see `fetchSubscriptionEligibility` below for why. */
 export async function fetchCompanySyncProperties(env: CloudflareBindings, hubspotCompanyId: string): Promise<HubspotCompanyResult> {
 	const res = await hubspotFetch(
 		env,
@@ -110,4 +102,74 @@ export async function fetchCompanySyncProperties(env: CloudflareBindings, hubspo
 	const body = (await res.json()) as { properties: Record<string, string | null>; archived?: boolean };
 	if (body.archived) return { status: "not_found" };
 	return { status: "ok", properties: body.properties };
+}
+
+export type SubscriptionEligibility = { purchasedProWebsite: boolean; purchasedBaseWebsite: boolean };
+
+const WEBSITE_LINE_ITEM_NAMES = new Set(["Website: Pro Package", "Website: Base Package"]);
+
+/**
+ * Determines website-product eligibility from a company's actual HubSpot
+ * commerce data (Subscriptions → Line Items), NOT the manually-maintained
+ * `website___purchased_pro_website`/`website___purchased_base_website`
+ * Company properties this originally used (2026-08-29 decision, after
+ * finding two real companies where those properties were simply never
+ * set despite an active subscription, AND finding a third — Alpha
+ * Women's Center — where the property said "Pro" but its actual
+ * subscription's line items only contained "Website: Base Package").
+ * Only ACTIVE subscriptions count; only the exact line-item names
+ * "Website: Pro Package"/"Website: Base Package" count — every other
+ * line item (add-ons, grants, PPC, etc.) is disregarded per the user's
+ * explicit instruction, even though a subscription's own `hs_name` often
+ * only shows one bundled item plus "+ N more" and can't be trusted alone.
+ *
+ * Uses batch-read endpoints throughout (subscriptions batch/read, the v4
+ * batch associations endpoint, line_items batch/read) specifically to
+ * keep this to ~4 HubSpot API calls per company regardless of how many
+ * subscriptions/line items exist — Cloudflare's per-invocation subrequest
+ * ceiling was already hit once during the bulk-import backfill, and this
+ * check runs on every sync/import, so per-company call count matters.
+ */
+export async function fetchSubscriptionEligibility(env: CloudflareBindings, hubspotCompanyId: string): Promise<SubscriptionEligibility> {
+	const none: SubscriptionEligibility = { purchasedProWebsite: false, purchasedBaseWebsite: false };
+
+	const assocRes = await hubspotFetch(env, `/crm/v4/objects/companies/${hubspotCompanyId}/associations/subscriptions`);
+	if (!assocRes.ok) throw new Error(`Subscription associations fetch failed: HTTP ${assocRes.status}`);
+	const assocBody = (await assocRes.json()) as { results: { toObjectId: number }[] };
+	const subscriptionIds = assocBody.results.map((r) => String(r.toObjectId));
+	if (subscriptionIds.length === 0) return none;
+
+	const statusRes = await hubspotFetch(env, "/crm/v3/objects/subscriptions/batch/read", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ properties: ["hs_is_status_active"], inputs: subscriptionIds.map((id) => ({ id })) }),
+	});
+	if (!statusRes.ok) throw new Error(`Subscription batch read failed: HTTP ${statusRes.status}`);
+	const statusBody = (await statusRes.json()) as { results: { id: string; properties: { hs_is_status_active: string | null } }[] };
+	const activeSubscriptionIds = statusBody.results.filter((r) => r.properties.hs_is_status_active === "1").map((r) => r.id);
+	if (activeSubscriptionIds.length === 0) return none;
+
+	const lineItemAssocRes = await hubspotFetch(env, "/crm/v4/associations/subscriptions/line_items/batch/read", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ inputs: activeSubscriptionIds.map((id) => ({ id })) }),
+	});
+	if (!lineItemAssocRes.ok) throw new Error(`Subscription line-item associations batch read failed: HTTP ${lineItemAssocRes.status}`);
+	const lineItemAssocBody = (await lineItemAssocRes.json()) as { results: { from: { id: string }; to: { toObjectId: number }[] }[] };
+	const lineItemIds = [...new Set(lineItemAssocBody.results.flatMap((r) => r.to.map((t) => String(t.toObjectId))))];
+	if (lineItemIds.length === 0) return none;
+
+	const lineItemRes = await hubspotFetch(env, "/crm/v3/objects/line_items/batch/read", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ properties: ["name"], inputs: lineItemIds.map((id) => ({ id })) }),
+	});
+	if (!lineItemRes.ok) throw new Error(`Line item batch read failed: HTTP ${lineItemRes.status}`);
+	const lineItemBody = (await lineItemRes.json()) as { results: { properties: { name: string | null } }[] };
+	const names = new Set(lineItemBody.results.map((r) => r.properties.name).filter((n): n is string => n !== null && WEBSITE_LINE_ITEM_NAMES.has(n)));
+
+	return {
+		purchasedProWebsite: names.has("Website: Pro Package"),
+		purchasedBaseWebsite: names.has("Website: Base Package"),
+	};
 }

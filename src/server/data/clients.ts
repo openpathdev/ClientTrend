@@ -160,7 +160,11 @@ export async function updateGeneralNotes(
 export async function listHubspotLinkedClients(
 	supabase: SupabaseClient,
 ): Promise<{ id: string; name: string; hubspotCompanyId: string }[]> {
-	const { data, error } = await supabase.from("clients").select("id, name, hubspot_company_id").not("hubspot_company_id", "is", null);
+	const { data, error } = await supabase
+		.from("clients")
+		.select("id, name, hubspot_company_id")
+		.not("hubspot_company_id", "is", null)
+		.order("id");
 	if (error) throw new Error(error.message);
 	return (data as { id: string; name: string; hubspot_company_id: string }[]).map((r) => ({
 		id: r.id,

@@ -15,7 +15,7 @@ import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus 
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, tryAutoImportCompany } from "./syncHubspot";
 import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
-import { searchEligibleCompanies, fetchCompanySyncProperties } from "./hubspot";
+import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility } from "./hubspot";
 import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
 import { listCsmsWithOwnerId } from "./data/csms";
 import { renderHubspotResults, renderImportedRow } from "./render/hubspotImportPanel";
@@ -584,10 +584,11 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const hubspotCompanyId = c.req.param("hubspotCompanyId");
 
-	const [company, csms, statuses] = await Promise.all([
+	const [company, csms, statuses, eligibility] = await Promise.all([
 		fetchCompanySyncProperties(c.env, hubspotCompanyId),
 		listCsmsWithOwnerId(supabase),
 		listStatuses(supabase),
+		fetchSubscriptionEligibility(c.env, hubspotCompanyId),
 	]);
 	if (company.status === "not_found") return c.text("Company not found or archived", 404);
 
@@ -602,8 +603,8 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
 		domainAuthority: company.properties.domain_authority ? Number(company.properties.domain_authority) : null,
 		csmId,
 		defaultStatusId,
-		purchasedProWebsite: company.properties.website___purchased_pro_website === "true",
-		purchasedBaseWebsite: company.properties.website___purchased_base_website === "true",
+		purchasedProWebsite: eligibility.purchasedProWebsite,
+		purchasedBaseWebsite: eligibility.purchasedBaseWebsite,
 	});
 
 	return c.html(renderImportedRow(hubspotCompanyId, client.id));
@@ -619,7 +620,23 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
  * POSTs here with the `X-Sync-Secret` header checked in src/middleware.ts.
  */
 app.post("/api/admin/hubspot-sync/run", async (c) => {
-	const result = await runHubspotSync(c.env);
+	const cursorParam = c.req.query("cursor");
+	const cursor = cursorParam !== undefined ? Number(cursorParam) : undefined;
+	const runId = c.req.query("runId") ?? undefined;
+	const result = await runHubspotSync(c.env, { cursor, runId });
+
+	if (result.status === "more") {
+		const nextUrl = new URL(c.req.url);
+		nextUrl.searchParams.set("cursor", String(result.nextCursor));
+		nextUrl.searchParams.set("runId", result.runId);
+		c.executionCtx.waitUntil(
+			fetch(nextUrl.toString(), {
+				method: "POST",
+				headers: { "X-Sync-Secret": c.env.HUBSPOT_SYNC_SECRET, Origin: nextUrl.origin },
+			}),
+		);
+	}
+
 	return c.json(result);
 });
 

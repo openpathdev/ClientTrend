@@ -8,6 +8,6 @@ export async function listStates(supabase: SupabaseClient): Promise<StateRef[]> 
 		.from("states")
 		.select("code, name, sort_order")
 		.order("sort_order", { ascending: true });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as StateRow[]).map((s) => ({ code: s.code, name: s.name, sortOrder: s.sort_order }));
 }

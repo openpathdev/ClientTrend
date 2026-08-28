@@ -55,6 +55,7 @@ function renderCommentItem(clientId: string, section: CommentSection, metricId: 
 				rows="2"
 				maxlength="2000"
 				required
+				aria-label="Edit comment"
 				class="w-full rounded-md border border-card-border px-2 py-1 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			>
 ${comment.body}</textarea
@@ -113,6 +114,7 @@ export function renderCommentPopover(
 			rows="2"
 			maxlength="2000"
 			required
+			aria-label="Add a comment"
 			placeholder="Add a comment…"
 			class="w-full rounded-md border border-card-border px-2 py-1 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 		></textarea>

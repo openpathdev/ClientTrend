@@ -35,7 +35,7 @@ export async function listMonthlyMetrics(supabase: SupabaseClient): Promise<Mont
 		.select("*")
 		.eq("active", true)
 		.order("sort_order", { ascending: true });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as MetricRow[]).map(mapMetric);
 }
 
@@ -51,5 +51,5 @@ export async function createMonthlyMetric(
 		group_label: input.groupLabel,
 		source: "manual",
 	});
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }

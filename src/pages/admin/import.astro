@@ -1,0 +1,17 @@
+---
+export const prerender = false;
+
+import Layout from "../../layouts/Layout.astro";
+import { renderHubspotImportPanel } from "../../server/render/hubspotImportPanel";
+
+const panelHtml = (await renderHubspotImportPanel()).toString();
+---
+
+<Layout title="Import Client">
+	<main class="mx-auto max-w-3xl px-6 py-10">
+		<a href="/" class="text-[13px] font-medium text-link hover:underline">&larr; All clients</a>
+		<div class="mt-4">
+			<Fragment set:html={panelHtml} />
+		</div>
+	</main>
+</Layout>

@@ -49,6 +49,7 @@ function renderLinkItem(clientId: string, link: Link) {
 				name="title"
 				value="${link.title}"
 				required
+				aria-label="Link title"
 				placeholder="Title"
 				class="w-full rounded-md border border-card-border px-2 py-1.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			/>
@@ -57,6 +58,7 @@ function renderLinkItem(clientId: string, link: Link) {
 				name="url"
 				value="${link.url}"
 				required
+				aria-label="Link URL"
 				placeholder="https://…"
 				class="w-full rounded-md border border-card-border px-2 py-1.5 font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			/>
@@ -78,6 +80,7 @@ export function renderLinksSection(clientId: string, links: Link[], error?: stri
 				type="text"
 				name="title"
 				required
+				aria-label="Link title"
 				placeholder="Title"
 				class="w-full rounded-md border border-card-border px-2 py-1.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			/>
@@ -85,6 +88,7 @@ export function renderLinksSection(clientId: string, links: Link[], error?: stri
 				type="url"
 				name="url"
 				required
+				aria-label="Link URL"
 				placeholder="https://…"
 				class="w-full rounded-md border border-card-border px-2 py-1.5 font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			/>

@@ -50,12 +50,14 @@ function renderChangeItem(clientId: string, change: Change) {
 				name="changeDate"
 				value="${change.changeDate}"
 				required
+				aria-label="Change date"
 				class="w-fit rounded-md border border-card-border px-2 py-1.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			/>
 			<textarea
 				name="description"
 				rows="2"
 				required
+				aria-label="Change description"
 				class="w-full rounded-md border border-card-border px-2 py-1.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			>
 ${change.description}</textarea
@@ -87,12 +89,14 @@ export function renderChangesSection(clientId: string, changes: Change[], error?
 					name="changeDate"
 					value="${today}"
 					required
+					aria-label="Change date"
 					class="w-fit rounded-md border border-card-border px-2 py-1.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 				/>
 				<textarea
 					name="description"
 					rows="2"
 					required
+					aria-label="Change description"
 					placeholder="What changed?"
 					class="w-full rounded-md border border-card-border px-2 py-1.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 				></textarea>

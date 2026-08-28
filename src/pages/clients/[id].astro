@@ -20,10 +20,11 @@ import { renderChangesSection } from "../../server/render/changesSection";
 import { renderLinksSection } from "../../server/render/linksSection";
 import { renderMonthlyDataTable } from "../../server/render/monthlyDataTable";
 import { renderPaidAdsSettings } from "../../server/render/paidAdsSettings";
+import { isValidUuid } from "../../server/validation";
 
 const { id } = Astro.params;
 const supabase = createSupabaseClient(env);
-const client = id ? await getClientById(supabase, id) : null;
+const client = id && isValidUuid(id) ? await getClientById(supabase, id) : null;
 
 if (!client) {
 	Astro.response.status = 404;

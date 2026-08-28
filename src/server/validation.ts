@@ -1,3 +1,18 @@
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Validates a path param looks like a UUID before it ever reaches a
+ * Supabase query — Postgres throws a raw "invalid input syntax for type
+ * uuid" error on a malformed id, and letting that propagate uncaught was
+ * leaking the DB error message straight into a 500 response (PRD §24/§29:
+ * no error response may expose internal identifiers/SQL details). Callers
+ * treat a failed check as "not found," matching what a well-formed but
+ * nonexistent id already does.
+ */
+export function isValidUuid(value: string): boolean {
+	return UUID_RE.test(value);
+}
+
 /** Well-formed absolute http(s) URL only — rejects javascript:/data: schemes (PRD §13, §24). */
 export function isValidLinkUrl(url: string): boolean {
 	try {

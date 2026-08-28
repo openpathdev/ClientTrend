@@ -13,6 +13,11 @@ import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus 
 import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
 import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus } from "./data/paidAdsData";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
+import { runHubspotSync } from "./syncHubspot";
+import { searchEligibleCompanies, fetchCompanySyncProperties } from "./hubspot";
+import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
+import { listCsmsWithOwnerId } from "./data/csms";
+import { renderHubspotResults, renderImportedRow } from "./render/hubspotImportPanel";
 import { renderOverviewPanel } from "./render/overviewPanel";
 import { renderClientCard } from "./render/card";
 import { renderClientHeader } from "./render/clientHeader";
@@ -43,6 +48,24 @@ app.use("*", async (c, next) => {
 	}
 	c.set("userEmail", userEmail);
 	await next();
+});
+
+/**
+ * Last-resort safety net (PRD §24/§29): without this, an uncaught throw
+ * (e.g. a malformed-UUID path param reaching Supabase — Postgres's raw
+ * "invalid input syntax for type uuid" error) propagates straight into the
+ * response body, leaking an internal/DB-shaped error message. Individual
+ * routes should still validate their own inputs (see isValidUuid in
+ * validation.ts) rather than relying on this alone, but it guarantees no
+ * route can leak internals just because a case was missed.
+ */
+app.onError((err, c) => {
+	console.error(err);
+	const message = err instanceof Error ? err.message : String(err);
+	if (/invalid input syntax for type uuid/i.test(message)) {
+		return c.text("Not found", 404);
+	}
+	return c.text("Something went wrong. Please try again.", 500);
 });
 
 function readFilters(c: { req: { query: (key: string) => string | undefined } }): ClientFilters {
@@ -88,6 +111,16 @@ app.patch("/api/clients/:id/status", async (c) => {
 	if (!updated) return c.text("Client not found", 404);
 
 	return c.html(view === "header" ? renderClientHeader(updated, statuses) : renderClientCard(updated, statuses));
+});
+
+/** Clears hubspot_company_id so a bad match can be corrected without deleting the client (PRD §14). */
+app.post("/api/clients/:id/hubspot-unlink", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	await unlinkHubspotClient(supabase, clientId);
+	const [updated, statuses] = await Promise.all([getClientById(supabase, clientId), listStatuses(supabase)]);
+	if (!updated) return c.text("Client not found", 404);
+	return c.html(renderClientHeader(updated, statuses));
 });
 
 // ---- General Notes (PRD §13) — a single freeform block per client, not a list ----
@@ -527,6 +560,66 @@ app.post("/api/admin/paid-ads-metrics", async (c) => {
 	const nextSortOrder = metrics.reduce((max, m) => Math.max(max, m.sortOrder), 0) + 1;
 	await createPaidAdsMetric(supabase, { key, label, valueType, sortOrder: nextSortOrder });
 	return c.html(renderMetricAdminPanel("paid_ads", await listPaidAdsMetrics(supabase)));
+});
+
+// ---- HubSpot company import (PRD §14/§36) ----
+
+app.get("/api/admin/hubspot-companies", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const q = c.req.query("q") ?? "";
+	try {
+		const [results, importedIds] = await Promise.all([
+			searchEligibleCompanies(c.env, q),
+			listImportedHubspotCompanyIds(supabase),
+		]);
+		return c.html(renderHubspotResults(results, importedIds));
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return c.html(renderHubspotResults([], new Set(), message), 502);
+	}
+});
+
+app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const hubspotCompanyId = c.req.param("hubspotCompanyId");
+
+	const [company, csms, statuses] = await Promise.all([
+		fetchCompanySyncProperties(c.env, hubspotCompanyId),
+		listCsmsWithOwnerId(supabase),
+		listStatuses(supabase),
+	]);
+	if (company.status === "not_found") return c.text("Company not found or archived", 404);
+
+	const csmId = company.properties.csm ? csms.find((s) => s.hubspotOwnerId === company.properties.csm)?.id : undefined;
+	const defaultStatusId = statuses[0].id;
+
+	const client = await createClientFromHubspot(supabase, {
+		hubspotCompanyId,
+		name: company.properties.name ?? "Untitled",
+		website: company.properties.domain ?? null,
+		population: company.properties.service_area_population ? Number(company.properties.service_area_population) : null,
+		domainAuthority: company.properties.domain_authority ? Number(company.properties.domain_authority) : null,
+		csmId,
+		defaultStatusId,
+		purchasedProWebsite: company.properties.website___purchased_pro_website === "true",
+		purchasedBaseWebsite: company.properties.website___purchased_base_website === "true",
+	});
+
+	return c.html(renderImportedRow(hubspotCompanyId, client.id));
+});
+
+// ---- HubSpot sync trigger (PRD §14) ----
+
+/**
+ * Syncs the 5 simple Company properties + CSM/Owners — never
+ * `her_journey_org_data` (see scripts/sync_org_data.py). "Daily" sync means
+ * an external cron (not a native Cloudflare Cron Trigger — Astro's
+ * Cloudflare adapter doesn't expose a `scheduled()` hook to attach one to)
+ * POSTs here with the `X-Sync-Secret` header checked in src/middleware.ts.
+ */
+app.post("/api/admin/hubspot-sync/run", async (c) => {
+	const result = await runHubspotSync(c.env);
+	return c.json(result);
 });
 
 export default app;

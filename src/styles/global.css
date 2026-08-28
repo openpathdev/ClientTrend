@@ -28,7 +28,7 @@
 	/* Text */
 	--color-ink: #1f242e;
 	--color-muted: #6c727a;
-	--color-label: #7a8189;
+	--color-label: #676d74; /* darkened from #7a8189 (Cool Slate style guide) — 3.90:1 failed WCAG AA at the small uppercase-label sizes this token is used at; this clears 4.5:1 against both --color-surface and --color-canvas */
 	--color-link: #3b6987;
 
 	/* Status: healthy (on plan) */

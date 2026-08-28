@@ -36,6 +36,6 @@ export async function listStatuses(supabase: SupabaseClient): Promise<Status[]> 
 		.select("id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active")
 		.eq("active", true)
 		.order("sort_order", { ascending: true });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as StatusRow[]).map(mapStatus);
 }

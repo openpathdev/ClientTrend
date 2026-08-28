@@ -33,7 +33,7 @@ export async function listLinks(supabase: SupabaseClient, clientId: string): Pro
 		.select("*")
 		.eq("client_id", clientId)
 		.order("created_at", { ascending: false });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as LinkRow[]).map(mapLink);
 }
 
@@ -51,7 +51,7 @@ export async function createLink(
 		category: input.category,
 		created_by: createdBy,
 	});
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }
 
 export async function updateLink(
@@ -63,10 +63,10 @@ export async function updateLink(
 		.from("links")
 		.update({ title: input.title, url: input.url, description: input.description, category: input.category })
 		.eq("id", linkId);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }
 
 export async function deleteLink(supabase: SupabaseClient, linkId: string): Promise<void> {
 	const { error } = await supabase.from("links").delete().eq("id", linkId);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }

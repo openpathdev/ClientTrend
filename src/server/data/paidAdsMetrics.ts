@@ -35,7 +35,7 @@ export async function listPaidAdsMetrics(supabase: SupabaseClient): Promise<Paid
 		.select("*")
 		.eq("active", true)
 		.order("sort_order", { ascending: true });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as MetricRow[]).map(mapMetric);
 }
 
@@ -50,5 +50,5 @@ export async function createPaidAdsMetric(
 		sort_order: input.sortOrder,
 		source: "manual",
 	});
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }

@@ -32,7 +32,7 @@ export async function listChanges(supabase: SupabaseClient, clientId: string): P
 		.eq("client_id", clientId)
 		.order("change_date", { ascending: false })
 		.order("created_at", { ascending: false });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as ChangeRow[]).map(mapChange);
 }
 
@@ -49,7 +49,7 @@ export async function createChange(
 		category: input.category,
 		created_by: createdBy,
 	});
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }
 
 export async function updateChange(
@@ -61,10 +61,10 @@ export async function updateChange(
 		.from("changes")
 		.update({ change_date: input.changeDate, description: input.description, category: input.category })
 		.eq("id", changeId);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }
 
 export async function deleteChange(supabase: SupabaseClient, changeId: string): Promise<void> {
 	const { error } = await supabase.from("changes").delete().eq("id", changeId);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }

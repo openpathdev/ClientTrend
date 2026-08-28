@@ -6,8 +6,15 @@
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 
-# HubSpot (server-only, used only by the Phase 6 scheduled sync job)
+# HubSpot (server-only, used only by the Phase 6 sync job)
 HUBSPOT_API_TOKEN=
+
+# Shared secret for POST /api/admin/hubspot-sync/run (PRD §14). Astro's
+# Cloudflare adapter doesn't expose a `scheduled()` hook, so "daily sync"
+# is triggered by an external cron (e.g. GitHub Actions) POSTing to this
+# route with header `X-Sync-Secret: <value>` — not a native Cloudflare
+# Cron Trigger. Generate with `openssl rand -hex 32`.
+HUBSPOT_SYNC_SECRET=
 
 # Cloudflare Access (PRD §23). Leave both blank for local dev — access.ts
 # falls back to a fixed dev identity when CF_ACCESS_TEAM_DOMAIN is unset.

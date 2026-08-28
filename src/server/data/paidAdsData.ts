@@ -39,7 +39,7 @@ export async function listPaidAdsDataValues(
 		.eq("client_id", clientId)
 		.gte("month", startMonth)
 		.lte("month", endMonth);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as ValueRow[]).map(mapValue);
 }
 
@@ -57,7 +57,7 @@ export async function getPaidAdsDataValue(
 		.eq("metric_id", metricId)
 		.eq("month", month)
 		.maybeSingle();
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return data ? mapValue(data as ValueRow) : null;
 }
 
@@ -88,7 +88,7 @@ export async function upsertPaidAdsDataValue(
 		)
 		.select()
 		.single();
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return mapValue(data as ValueRow);
 }
 
@@ -105,6 +105,6 @@ export async function setPaidAdsDataValueStatus(
 		)
 		.select()
 		.single();
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return mapValue(data as ValueRow);
 }

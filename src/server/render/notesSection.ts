@@ -45,6 +45,7 @@ export function renderNotesSection(client: ClientRow, error?: string) {
 				name="body"
 				rows="8"
 				maxlength="5000"
+				aria-label="General notes"
 				placeholder="Add general notes about this client…"
 				class="w-full rounded-md border border-card-border px-2 py-1.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 			>

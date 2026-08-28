@@ -2,6 +2,9 @@
 PRD.md
 tasks.md
 
+# reference code from another app, not part of this project
+ProcessData/
+
 # build output
 dist/
 # generated types
@@ -9,6 +12,7 @@ dist/
 
 # dependencies
 node_modules/
+__pycache__/
 
 # logs
 npm-debug.log*

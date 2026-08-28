@@ -43,6 +43,7 @@ export function renderPaidAdsSettings(client: ClientRow, error?: string) {
 					type="date"
 					name="goLiveDate"
 					value="${goLiveRaw}"
+					aria-label="Go-live date"
 					class="rounded border border-card-border px-1.5 py-0.5 text-[11px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 				/>
 				<button type="submit" class="font-medium text-link hover:underline">Save</button>
@@ -69,6 +70,7 @@ export function renderPaidAdsSettings(client: ClientRow, error?: string) {
 					inputmode="decimal"
 					name="adSpendPerMonth"
 					value="${spendRaw}"
+					aria-label="Ad spend per month"
 					placeholder="e.g. 2400"
 					class="w-20 rounded border border-card-border px-1.5 py-0.5 text-right font-mono text-[11px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 				/>

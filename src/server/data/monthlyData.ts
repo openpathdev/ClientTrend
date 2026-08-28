@@ -40,7 +40,7 @@ export async function listMonthlyDataValues(
 		.eq("client_id", clientId)
 		.gte("month", startMonth)
 		.lte("month", endMonth);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as ValueRow[]).map(mapValue);
 }
 
@@ -58,7 +58,7 @@ export async function getMonthlyDataValue(
 		.eq("metric_id", metricId)
 		.eq("month", month)
 		.maybeSingle();
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return data ? mapValue(data as ValueRow) : null;
 }
 
@@ -89,7 +89,7 @@ export async function upsertMonthlyDataValue(
 		)
 		.select()
 		.single();
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return mapValue(data as ValueRow);
 }
 
@@ -106,6 +106,6 @@ export async function setMonthlyDataValueStatus(
 		)
 		.select()
 		.single();
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return mapValue(data as ValueRow);
 }

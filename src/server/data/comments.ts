@@ -46,7 +46,7 @@ export async function listComments(
 		.eq("metric_id", metricId)
 		.eq("month", month)
 		.order("created_at", { ascending: false });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	return (data as CommentRow[]).map(mapComment);
 }
 
@@ -70,7 +70,7 @@ export async function listCommentsForRange(
 		.gte("month", startMonth)
 		.lte("month", endMonth)
 		.order("created_at", { ascending: false });
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 	const byCell = new Map<string, Comment[]>();
 	for (const row of (data as CommentRow[]).map(mapComment)) {
 		const key = cellKey(row.metricId, row.month);
@@ -91,7 +91,7 @@ export async function createComment(
 		body: input.body,
 		created_by: input.createdBy,
 	});
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }
 
 export async function updateComment(
@@ -101,10 +101,10 @@ export async function updateComment(
 	updatedBy: string,
 ): Promise<void> {
 	const { error } = await supabase.from("comments").update({ body, updated_by: updatedBy }).eq("id", commentId);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }
 
 export async function deleteComment(supabase: SupabaseClient, commentId: string): Promise<void> {
 	const { error } = await supabase.from("comments").delete().eq("id", commentId);
-	if (error) throw error;
+	if (error) throw new Error(error.message);
 }

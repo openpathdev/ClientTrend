@@ -52,6 +52,33 @@ export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 									>`
 								: ""
 						}
+						${
+							client.hubspotCompanyId
+								? html`<span class="text-muted">·</span>
+									<span x-data="{ confirming: false }">
+										<button
+											type="button"
+											x-show="!confirming"
+											x-on:click="confirming = true"
+											class="text-muted hover:underline"
+										>
+											unlink
+										</button>
+										<span x-show="confirming" x-cloak class="whitespace-nowrap">
+											<button
+												type="button"
+												hx-post="/api/clients/${client.id}/hubspot-unlink"
+												hx-target="#client-header"
+												hx-swap="outerHTML"
+												class="font-medium text-needs-attention-text hover:underline"
+											>
+												Confirm unlink
+											</button>
+											<button type="button" x-on:click="confirming = false" class="ml-1 text-muted hover:underline">Cancel</button>
+										</span>
+									</span>`
+								: ""
+						}
 					</div>
 				</div>
 			</div>

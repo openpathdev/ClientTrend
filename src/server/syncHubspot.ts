@@ -1,8 +1,9 @@
 import type { CloudflareBindings } from "./bindings";
 import { createSupabaseClient } from "./supabase";
 import { fetchAllOwners, fetchCompanySyncProperties, HubspotRateLimitError } from "./hubspot";
-import { upsertCsmFromOwner, listCsmsWithOwnerId } from "./data/csms";
-import { listHubspotLinkedClients, applyHubspotSync, markHubspotSyncStatus } from "./data/clients";
+import { upsertCsmFromOwner, listCsmsWithOwnerId, listCsms, canonicalOwnerId } from "./data/csms";
+import { listStatuses } from "./data/statuses";
+import { listHubspotLinkedClients, applyHubspotSync, markHubspotSyncStatus, createClientFromHubspot } from "./data/clients";
 import { createSyncRun, finishSyncRun, logSyncResult } from "./data/hubspotSyncLog";
 
 const MAX_RATE_LIMIT_RETRIES = 3;
@@ -59,7 +60,7 @@ export async function runHubspotSync(env: CloudflareBindings): Promise<{
 					}
 
 					const props = result.properties;
-					const csmId = props.csm ? csmByOwnerId.get(props.csm) : undefined;
+					const csmId = props.csm ? csmByOwnerId.get(canonicalOwnerId(props.csm)) : undefined;
 					if (props.csm && !csmId) {
 						// No matching owner yet — leave csm_id unchanged rather than nulling it (PRD §14).
 						await logSyncResult(supabase, runId, client.id, "synced", `csm property "${props.csm}" did not match any known owner; csm_id left unchanged`);
@@ -106,4 +107,63 @@ export async function runHubspotSync(env: CloudflareBindings): Promise<{
 		await finishSyncRun(supabase, runId, { status: "failed", clientsProcessed, clientsFailed, errorSummary: message });
 		return { runId, clientsProcessed, clientsFailed, status: "failed" };
 	}
+}
+
+export type AutoImportResult =
+	| { status: "imported"; clientId: string }
+	| { status: "already_imported"; clientId: string }
+	| { status: "ineligible"; reason: string }
+	| { status: "not_found" };
+
+/**
+ * Triggered by a HubSpot Workflow's "Send a webhook" action, configured by
+ * the user in the HubSpot portal (2026-08-29 decision — a true push
+ * trigger, not polling; not configurable via the Private App API, which
+ * 403s on the Webhooks API for private apps, only public/marketplace
+ * apps). Given a company id, re-fetches its current properties from
+ * HubSpot directly (never trusts the webhook payload's own shape/content,
+ * since HubSpot Workflow webhook actions are user-configurable and could
+ * send almost anything) and imports it if — and only if — it's eligible:
+ * `csm` resolves to one of the currently *active* CSMs (via
+ * `canonicalOwnerId`, so either email-domain variant of a duplicate owner
+ * still counts) AND it has purchased the Pro or Base website product
+ * (2026-08-28/29 decision — same rule as the Overview page's baseline
+ * visibility filter, see `listClients`).
+ */
+export async function tryAutoImportCompany(env: CloudflareBindings, hubspotCompanyId: string): Promise<AutoImportResult> {
+	const supabase = createSupabaseClient(env);
+
+	const existing = await supabase.from("clients").select("id").eq("hubspot_company_id", hubspotCompanyId).maybeSingle();
+	if (existing.error) throw new Error(existing.error.message);
+	if (existing.data) return { status: "already_imported", clientId: (existing.data as { id: string }).id };
+
+	const result = await fetchCompanySyncProperties(env, hubspotCompanyId);
+	if (result.status === "not_found") return { status: "not_found" };
+	const props = result.properties;
+
+	const [activeCsms, ownerLinks, statuses] = await Promise.all([listCsms(supabase), listCsmsWithOwnerId(supabase), listStatuses(supabase)]);
+	const activeCsmIds = new Set(activeCsms.map((c) => c.id));
+	const activeCsmByOwnerId = new Map(ownerLinks.filter((o) => activeCsmIds.has(o.id)).map((o) => [o.hubspotOwnerId, o.id]));
+
+	const csmId = props.csm ? activeCsmByOwnerId.get(canonicalOwnerId(props.csm)) : undefined;
+	if (!csmId) return { status: "ineligible", reason: `csm "${props.csm ?? "(none)"}" is not one of the active CSMs` };
+
+	const purchasedProWebsite = props.website___purchased_pro_website === "true";
+	const purchasedBaseWebsite = props.website___purchased_base_website === "true";
+	if (!purchasedProWebsite && !purchasedBaseWebsite) {
+		return { status: "ineligible", reason: "no Pro or Base website product purchased" };
+	}
+
+	const client = await createClientFromHubspot(supabase, {
+		hubspotCompanyId,
+		name: props.name ?? "Untitled",
+		website: props.domain ?? null,
+		population: props.service_area_population ? Number(props.service_area_population) : null,
+		domainAuthority: props.domain_authority ? Number(props.domain_authority) : null,
+		csmId,
+		defaultStatusId: statuses[0].id,
+		purchasedProWebsite,
+		purchasedBaseWebsite,
+	});
+	return { status: "imported", clientId: client.id };
 }

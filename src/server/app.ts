@@ -13,7 +13,8 @@ import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus 
 import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
 import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus } from "./data/paidAdsData";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
-import { runHubspotSync } from "./syncHubspot";
+import { runHubspotSync, tryAutoImportCompany } from "./syncHubspot";
+import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
 import { searchEligibleCompanies, fetchCompanySyncProperties } from "./hubspot";
 import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
 import { listCsmsWithOwnerId } from "./data/csms";
@@ -620,6 +621,51 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
 app.post("/api/admin/hubspot-sync/run", async (c) => {
 	const result = await runHubspotSync(c.env);
 	return c.json(result);
+});
+
+type HubspotWebhookEvent = {
+	subscriptionType?: string;
+	objectId?: number | string;
+	propertyName?: string;
+};
+
+/**
+ * Receives HubSpot's native app-level CRM property-change webhook
+ * (subscribed on a separate private app, to the Company `csm` property —
+ * PRD §14, 2026-08-29 decision; superseded the earlier Workflow-based
+ * design once the user confirmed they could set this up directly, which
+ * is both simpler and properly signable). The signature is verified
+ * against the raw request body via `verifyHubspotWebhookSignature` before
+ * anything is parsed or trusted. The payload is HubSpot's standard event
+ * array — one entry per property change — filtered to
+ * `company.propertyChange` events on `csm`; the actual eligibility check
+ * and import happen in `tryAutoImportCompany`, which re-fetches the
+ * company's current properties directly rather than trusting anything in
+ * the event body beyond the object id.
+ */
+app.post("/api/webhooks/hubspot/company", async (c) => {
+	const rawBody = await c.req.text();
+	const valid = await verifyHubspotWebhookSignature(c.req.raw, rawBody, c.env);
+	if (!valid) return c.text("Invalid signature", 401);
+
+	let events: HubspotWebhookEvent[];
+	try {
+		events = JSON.parse(rawBody);
+	} catch {
+		return c.text("Invalid payload", 400);
+	}
+
+	const companyIds = new Set(
+		events
+			.filter((e) => e.subscriptionType === "company.propertyChange" && e.propertyName === "csm" && e.objectId != null)
+			.map((e) => String(e.objectId)),
+	);
+
+	const results: Record<string, unknown> = {};
+	for (const companyId of companyIds) {
+		results[companyId] = await tryAutoImportCompany(c.env, companyId);
+	}
+	return c.json({ processed: results });
 });
 
 export default app;

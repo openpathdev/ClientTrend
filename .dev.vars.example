@@ -16,6 +16,12 @@ HUBSPOT_API_TOKEN=
 # Cron Trigger. Generate with `openssl rand -hex 32`.
 HUBSPOT_SYNC_SECRET=
 
+# Client Secret of the (separate) private app that owns the Company
+# `csm` property-change webhook subscription (PRD §14). Used to verify
+# HubSpot's X-HubSpot-Signature-v3 header on POST /api/webhooks/hubspot/company
+# — NOT the same value as HUBSPOT_API_TOKEN. Find it on that app's Auth tab.
+HUBSPOT_WEBHOOK_CLIENT_SECRET=
+
 # Cloudflare Access (PRD §23). Leave both blank for local dev — access.ts
 # falls back to a fixed dev identity when CF_ACCESS_TEAM_DOMAIN is unset.
 CF_ACCESS_TEAM_DOMAIN=

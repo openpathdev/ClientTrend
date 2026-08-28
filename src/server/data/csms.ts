@@ -20,6 +20,31 @@ export async function listCsmsWithOwnerId(supabase: SupabaseClient): Promise<{ i
 	return (data as { id: string; hubspot_owner_id: string }[]).map((r) => ({ id: r.id, hubspotOwnerId: r.hubspot_owner_id }));
 }
 
+/**
+ * Maps a HubSpot Owner id to its canonical variant for the same real
+ * person — several active CSMs (Nancy Kirchoff, Kyle Johnson, Ethan
+ * Kirkelie) have TWO Owner records in HubSpot, one per email domain
+ * (`@openpathdigital.com` and `@828collective.com`, an artifact of an
+ * account migration); `@828collective.com` was chosen as canonical
+ * (2026-08-28/29 user decision) and only that row is `active`. A
+ * Company's `csm` property may still reference the older/duplicate id
+ * depending on when it was set — without this alias, such a company would
+ * fail to resolve to any active CSM at all (silently skipped by
+ * auto-import, or left with a stale csm_id by the regular sync). This is
+ * hardcoded rather than derived because it's one-off tribal knowledge
+ * about this specific HubSpot account, not a general pattern — see the
+ * "known limitation" this was written to close, in tasks.md.
+ */
+const CSM_OWNER_ID_ALIASES: Record<string, string> = {
+	"577351169": "471622286", // Nancy Kirchoff
+	"94150336": "2103711256", // Kyle Johnson
+	"71270498": "1339539521", // Ethan Kirkelie
+};
+
+export function canonicalOwnerId(hubspotOwnerId: string): string {
+	return CSM_OWNER_ID_ALIASES[hubspotOwnerId] ?? hubspotOwnerId;
+}
+
 /** Upserts one CSM row keyed on hubspot_owner_id — called once per HubSpot Owner at the start of each sync run, before Companies are processed (PRD §14). */
 export async function upsertCsmFromOwner(
 	supabase: SupabaseClient,

@@ -1,0 +1,22 @@
+name: HubSpot sync
+
+# Triggers the production sync endpoint on a schedule. The endpoint itself
+# (POST /api/admin/hubspot-sync/run) processes clients in small batches and
+# self-chains across Worker invocations via waitUntil (see
+# src/server/syncHubspot.ts) to stay under Cloudflare's per-invocation
+# subrequest ceiling — this workflow only needs to fire the initial request,
+# not poll it to completion.
+on:
+  schedule:
+    - cron: "0 13 * * *" # 13:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger HubSpot sync
+        run: |
+          curl -fsS -X POST "https://client-trends.analytics-1cd.workers.dev/api/admin/hubspot-sync/run" \
+            -H "X-Sync-Secret: ${{ secrets.HUBSPOT_SYNC_SECRET }}" \
+            -H "Origin: https://client-trends.analytics-1cd.workers.dev"

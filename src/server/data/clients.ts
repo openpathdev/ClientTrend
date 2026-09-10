@@ -182,6 +182,8 @@ export async function applyHubspotSync(
 		website: string | null;
 		population: number | null;
 		domainAuthority: number | null;
+		stateCode: string | null;
+		legalStatus: string | null;
 		csmId?: string;
 		purchasedProWebsite: boolean;
 		purchasedBaseWebsite: boolean;
@@ -192,6 +194,8 @@ export async function applyHubspotSync(
 		website: input.website,
 		population: input.population,
 		domain_authority: input.domainAuthority,
+		state_code: input.stateCode,
+		legal_status: input.legalStatus,
 		hubspot_purchased_pro_website: input.purchasedProWebsite,
 		hubspot_purchased_base_website: input.purchasedBaseWebsite,
 		hubspot_sync_status: "synced",
@@ -219,6 +223,8 @@ export async function createClientFromHubspot(
 		website: string | null;
 		population: number | null;
 		domainAuthority: number | null;
+		stateCode: string | null;
+		legalStatus: string | null;
 		csmId?: string;
 		defaultStatusId: string;
 		purchasedProWebsite: boolean;
@@ -233,6 +239,8 @@ export async function createClientFromHubspot(
 			website: input.website,
 			population: input.population,
 			domain_authority: input.domainAuthority,
+			state_code: input.stateCode,
+			legal_status: input.legalStatus,
 			csm_id: input.csmId ?? null,
 			status_id: input.defaultStatusId,
 			hubspot_purchased_pro_website: input.purchasedProWebsite,

@@ -39,6 +39,7 @@ const CSM_OWNER_ID_ALIASES: Record<string, string> = {
 	"577351169": "471622286", // Nancy Kirchoff
 	"94150336": "2103711256", // Kyle Johnson
 	"71270498": "1339539521", // Ethan Kirkelie
+	"97937265": "98304593", // Laura Calhoun
 };
 
 export function canonicalOwnerId(hubspotOwnerId: string): string {

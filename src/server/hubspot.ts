@@ -85,11 +85,17 @@ export async function searchEligibleCompanies(env: CloudflareBindings, query: st
 	return body.results;
 }
 
+/** `hs_state_code`/`legal_status` have both been seen with stray whitespace (e.g. a trailing tab) in this HubSpot account's real data — trims and treats empty as unset. */
+export function normalizeHubspotText(value: string | null): string | null {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : null;
+}
+
 export type HubspotCompanyResult =
 	| { status: "ok"; properties: Record<string, string | null> }
 	| { status: "not_found" };
 
-const COMPANY_SYNC_PROPERTIES = ["name", "domain", "service_area_population", "domain_authority", "csm"];
+const COMPANY_SYNC_PROPERTIES = ["name", "domain", "service_area_population", "domain_authority", "csm", "hs_state_code", "legal_status"];
 
 /** Fetches the simple, directly-mapped Company properties (PRD §14) — never `her_journey_org_data`, see scripts/sync_org_data.py for why that's handled separately. Website product eligibility is NOT among these — see `fetchSubscriptionEligibility` below for why. */
 export async function fetchCompanySyncProperties(env: CloudflareBindings, hubspotCompanyId: string): Promise<HubspotCompanyResult> {

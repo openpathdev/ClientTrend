@@ -6,6 +6,9 @@ import { cellKey, domCellKey } from "../cellKey";
 
 const COMMENT_ICON_PATH =
 	'<path d="M20 2H4c-1.103 0-2 .897-2 2v12c0 1.103.897 2 2 2h3v4.434l7.740-4.434H20c1.103 0 2-.897 2-2V4c0-1.103-.897-2-2-2zM4 16V4h16l.001 12H4z"/>';
+/** Same message-square glyph as COMMENT_ICON_PATH but without the inner-rectangle cutout, so it renders as a solid shape rather than an outline — used for cells that already have comments, so the marker visibly stands out (2026-09-09). */
+const COMMENT_ICON_PATH_SOLID =
+	'<path d="M20 2H4c-1.103 0-2 .897-2 2v12c0 1.103.897 2 2 2h3v4.434l7.740-4.434H20c1.103 0 2-.897 2-2V4c0-1.103-.897-2-2-2z"/>';
 
 function highlightEndpoint(clientId: string, section: CommentSection, metricId: string, month: string): string {
 	const base = section === "monthly_data" ? "monthly-data" : "paid-ads";
@@ -98,7 +101,7 @@ export function renderCellMarkerButton(
 			aria-label="${hasComments ? `${String(cellComments.length)} comment${cellComments.length === 1 ? "" : "s"}, ` : ""}click to set a highlight or add a comment"
 		>
 			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="10" height="10" fill="currentColor" aria-hidden="true"
-				>${raw(COMMENT_ICON_PATH)}</svg
+				>${raw(hasComments ? COMMENT_ICON_PATH_SOLID : COMMENT_ICON_PATH)}</svg
 			>
 		</button>
 	</span>`;
@@ -189,7 +192,7 @@ export function renderMetricCell(
 
 	if (metric.source === "hubspot") {
 		return html`<td
-			class="group relative whitespace-nowrap px-3 py-2 text-right font-mono text-[13px] text-ink ${bgClass}"
+			class="group relative whitespace-nowrap px-3 py-2 text-right font-mono text-[14px] text-ink ${bgClass}"
 			style="${highlightStyle}"
 		>
 			${renderCellMarker(clientId, section, metric, month, status, statuses, cellComments)}
@@ -208,7 +211,7 @@ export function renderMetricCell(
 			type="button"
 			x-show="!editing"
 			x-on:click="editing = true"
-			class="w-full min-w-[72px] rounded px-2 py-1 text-right font-mono text-[13px] text-ink hover:bg-zebra-row"
+			class="w-full min-w-[72px] rounded px-2 py-1 text-right font-mono text-[14px] text-ink hover:bg-zebra-row"
 		>
 			${rawValue === "" ? "—" : rawValue}
 		</button>
@@ -225,7 +228,7 @@ export function renderMetricCell(
 			hx-trigger="change, keyup[key=='Enter']"
 			hx-target="closest td"
 			hx-swap="outerHTML"
-			class="w-full min-w-[72px] rounded border border-card-border px-2 py-1 text-right font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
+			class="w-full min-w-[72px] rounded border border-card-border px-2 py-1 text-right font-mono text-[14px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 		/>
 	</td>`;
 }

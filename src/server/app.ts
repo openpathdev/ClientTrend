@@ -15,7 +15,7 @@ import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus 
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, tryAutoImportCompany } from "./syncHubspot";
 import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
-import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility } from "./hubspot";
+import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText } from "./hubspot";
 import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
 import { listCsmsWithOwnerId } from "./data/csms";
 import { renderHubspotResults, renderImportedRow } from "./render/hubspotImportPanel";
@@ -601,6 +601,8 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
 		website: company.properties.domain ?? null,
 		population: company.properties.service_area_population ? Number(company.properties.service_area_population) : null,
 		domainAuthority: company.properties.domain_authority ? Number(company.properties.domain_authority) : null,
+		stateCode: normalizeHubspotText(company.properties.hs_state_code),
+		legalStatus: normalizeHubspotText(company.properties.legal_status),
 		csmId,
 		defaultStatusId,
 		purchasedProWebsite: eligibility.purchasedProWebsite,

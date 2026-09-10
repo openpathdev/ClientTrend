@@ -30,6 +30,15 @@ const { title } = Astro.props;
 		</div>
 		<script is:inline>
 			(function () {
+				// htmx never swaps a 4xx/5xx response body in by default (responseHandling:
+				// [45].. -> swap:false) — but our routes deliberately render a full HTML
+				// fragment with a specific inline message on 400 (validation failure), meant
+				// to replace the section in place. Without this override that fragment was
+				// silently discarded and only the generic toast below ever showed, even for
+				// the user's own input mistakes. True 5xx/network failures still fall
+				// through to the toast, since there's no useful fragment to show for those.
+				htmx.config.responseHandling.unshift({ code: "400", swap: true });
+
 				var toast = document.getElementById("cx-toast");
 				var timer;
 				function show(message) {

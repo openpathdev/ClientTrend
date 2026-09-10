@@ -1,6 +1,6 @@
 import type { CloudflareBindings } from "./bindings";
 import { createSupabaseClient } from "./supabase";
-import { fetchAllOwners, fetchCompanySyncProperties, fetchSubscriptionEligibility, HubspotRateLimitError } from "./hubspot";
+import { fetchAllOwners, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, HubspotRateLimitError } from "./hubspot";
 import { upsertCsmFromOwner, listCsmsWithOwnerId, listCsms, canonicalOwnerId } from "./data/csms";
 import { listStatuses } from "./data/statuses";
 import { listHubspotLinkedClients, applyHubspotSync, markHubspotSyncStatus, createClientFromHubspot } from "./data/clients";
@@ -111,6 +111,8 @@ export async function runHubspotSync(
 						website: props.domain ?? null,
 						population: props.service_area_population ? Number(props.service_area_population) : null,
 						domainAuthority: props.domain_authority ? Number(props.domain_authority) : null,
+						stateCode: normalizeHubspotText(props.hs_state_code),
+						legalStatus: normalizeHubspotText(props.legal_status),
 						csmId,
 						purchasedProWebsite: eligibility.purchasedProWebsite,
 						purchasedBaseWebsite: eligibility.purchasedBaseWebsite,
@@ -208,6 +210,8 @@ export async function tryAutoImportCompany(env: CloudflareBindings, hubspotCompa
 		website: props.domain ?? null,
 		population: props.service_area_population ? Number(props.service_area_population) : null,
 		domainAuthority: props.domain_authority ? Number(props.domain_authority) : null,
+		stateCode: normalizeHubspotText(props.hs_state_code),
+		legalStatus: normalizeHubspotText(props.legal_status),
 		csmId,
 		defaultStatusId: statuses[0].id,
 		purchasedProWebsite,

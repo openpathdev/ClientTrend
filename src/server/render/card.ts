@@ -24,7 +24,7 @@ export function renderClientCard(client: ClientRow, statuses: Status[]) {
 	>
 		<a href="${href}" class="absolute inset-0 z-0 rounded-2xl" aria-label="View ${client.name}"></a>
 
-		<div class="relative z-10 pointer-events-none flex items-start gap-3">
+		<div class="relative z-20 pointer-events-none flex items-start gap-3">
 			<div class="pointer-events-auto relative" x-data="{ open: false }">
 				<button
 					type="button"
@@ -58,19 +58,19 @@ export function renderClientCard(client: ClientRow, statuses: Status[]) {
 		<div class="relative z-10 pointer-events-none mt-4 grid grid-cols-4 gap-2">
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">State</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatPlain(client.stateCode)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatPlain(client.stateCode)}</div>
 			</div>
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">Pop.</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatInteger(client.population)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatInteger(client.population)}</div>
 			</div>
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">DA</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatInteger(client.domainAuthority)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatInteger(client.domainAuthority)}</div>
 			</div>
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">Legal</div>
-				<div class="mt-1 truncate font-mono text-[13px] text-ink">${formatPlain(client.legalStatus)}</div>
+				<div class="mt-1 truncate font-mono text-[14px] text-ink">${formatPlain(client.legalStatus)}</div>
 			</div>
 		</div>
 

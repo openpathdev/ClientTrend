@@ -94,19 +94,19 @@ export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 		<div class="mt-5 grid grid-cols-2 gap-4 border-t border-row-rule pt-4 sm:grid-cols-4">
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">State</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatPlain(client.stateCode)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatPlain(client.stateCode)}</div>
 			</div>
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">Population</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatInteger(client.population)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatInteger(client.population)}</div>
 			</div>
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">Domain Authority</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatInteger(client.domainAuthority)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatInteger(client.domainAuthority)}</div>
 			</div>
 			<div>
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">Legal Status</div>
-				<div class="mt-1 font-mono text-[13px] text-ink">${formatPlain(client.legalStatus)}</div>
+				<div class="mt-1 font-mono text-[14px] text-ink">${formatPlain(client.legalStatus)}</div>
 			</div>
 		</div>
 	</div>`;

@@ -5,7 +5,14 @@ import { createSupabaseClient } from "./supabase";
 import { listStatuses } from "./data/statuses";
 import { listCsms } from "./data/csms";
 import { listStates } from "./data/states";
-import { listClients, updateClientStatus, updateGeneralNotes, updatePaidAdsSettings, getClientById } from "./data/clients";
+import {
+	listClients,
+	updateClientStatus,
+	updateGeneralNotes,
+	updatePaidAdsSettings,
+	updateClientIntegrationFlag,
+	getClientById,
+} from "./data/clients";
 import { listChanges, createChange, updateChange, deleteChange } from "./data/changes";
 import { listLinks, createLink, updateLink, deleteLink } from "./data/links";
 import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
@@ -32,7 +39,15 @@ import { renderPaidAdsSettings } from "./render/paidAdsSettings";
 import { renderMonthlyDataSection, renderPaidAdsSection } from "./clientDetailSections";
 import { DEFAULT_MONTH_WINDOW } from "./months";
 import { isValidLinkUrl, validateLength, parseMonthlyCellValue } from "./validation";
-import { CHANGE_CATEGORIES, type ChangeCategory, type ClientFilters, type CommentSection, type MonthlyMetricValueType } from "./data/types";
+import {
+	CHANGE_CATEGORIES,
+	INTEGRATION_FLAGS,
+	type ChangeCategory,
+	type ClientFilters,
+	type CommentSection,
+	type IntegrationFlag,
+	type MonthlyMetricValueType,
+} from "./data/types";
 
 export const app = new Hono<AppEnv>();
 
@@ -403,7 +418,13 @@ app.patch("/api/clients/:id/paid-ads/:metricId/:month/highlight", async (c) => {
 	return c.html(renderMetricCell(clientId, "paid_ads", metric, month, saved, bgClass, status, statuses, cellComments));
 });
 
-/** Go-live date + ad spend/mo — simple manually-entered client fields, not derived from any metric (PRD §11). */
+/**
+ * Go-live date + ad spend/mo — simple manually-entered client fields, not
+ * derived from any metric (PRD §11). `view` tells us which shaped fragment
+ * to return: the detail page's two-chip widget, or just the Ad Spend
+ * duplicate on the Overview card (PRD §5/§8) — same `{ view }` convention
+ * the status route already uses.
+ */
 app.patch("/api/clients/:id/paid-ads-settings", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const clientId = c.req.param("id");
@@ -411,6 +432,7 @@ app.patch("/api/clients/:id/paid-ads-settings", async (c) => {
 	if (!client) return c.text("Client not found", 404);
 
 	const body = await c.req.parseBody();
+	const view = body.view === "card" ? "card" : "detail";
 	const goLiveRaw = typeof body.goLiveDate === "string" ? body.goLiveDate.trim() : "";
 	const spendRaw = typeof body.adSpendPerMonth === "string" ? body.adSpendPerMonth.trim() : "";
 
@@ -419,14 +441,42 @@ app.patch("/api/clients/:id/paid-ads-settings", async (c) => {
 	if (spendRaw !== "") {
 		const parsed = Number(spendRaw);
 		if (!Number.isFinite(parsed) || parsed < 0) {
-			return c.html(renderPaidAdsSettings(client, "Ad spend must be a non-negative number."), 400);
+			const error = "Ad spend must be a non-negative number.";
+			if (view === "card") {
+				// The card's form's hx-target is the whole card (#client-card-...), not
+				// just the ad-spend widget — the error response must be a full card,
+				// otherwise htmx's outerHTML swap would replace the entire card with
+				// just this small fragment (found live while testing this route).
+				const statuses = await listStatuses(supabase);
+				return c.html(renderClientCard(client, statuses, error), 400);
+			}
+			return c.html(renderPaidAdsSettings(client, error), 400);
 		}
 		adSpendPerMonth = parsed;
 	}
 
 	const updated = await updatePaidAdsSettings(supabase, clientId, { adSpendPerMonth, goLiveDate });
 	if (!updated) return c.text("Client not found", 404);
+	if (view === "card") {
+		const statuses = await listStatuses(supabase);
+		return c.html(renderClientCard(updated, statuses));
+	}
 	return c.html(renderPaidAdsSettings(updated));
+});
+
+/** Toggles one "which external systems is this center on" checkbox on the Overview card (PRD §5/§8). */
+app.patch("/api/clients/:id/integration-flags", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const body = await c.req.parseBody();
+	const flag = typeof body.flag === "string" ? (body.flag as IntegrationFlag) : undefined;
+	if (!flag || !INTEGRATION_FLAGS.includes(flag)) return c.text("Unknown flag", 400);
+	const checked = body.checked === "true";
+
+	const updated = await updateClientIntegrationFlag(supabase, clientId, flag, checked);
+	if (!updated) return c.text("Client not found", 404);
+	const statuses = await listStatuses(supabase);
+	return c.html(renderClientCard(updated, statuses));
 });
 
 // ---- "Load earlier months" (PRD §10/§28 — tasks.md's previously-flagged gap) ----

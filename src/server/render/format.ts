@@ -15,6 +15,12 @@ export function formatPercent(value: number | null): string {
 	return `${value}%`;
 }
 
+/** Ad spend/mo (PRD §11) — shared by the Paid Ads detail-page chip and its duplicate on the Overview card. */
+export function formatMonthlySpend(value: number | null): string {
+	if (value === null) return `${EMPTY} / mo`;
+	return `$${value.toLocaleString("en-US")} / mo`;
+}
+
 export function truncate(value: string, max: number): string {
 	return value.length > max ? `${value.slice(0, max)}…` : value;
 }

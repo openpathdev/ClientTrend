@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ClientFilters, ClientRow } from "./types";
+import type { ClientFilters, ClientRow, IntegrationFlag } from "./types";
 import type { IconName } from "../../components/icons/icon-names";
 import { listCsms } from "./csms";
 
@@ -8,9 +8,18 @@ const CLIENT_SELECT = `
 	hubspot_company_id, hubspot_sync_status, hubspot_synced_at,
 	general_notes, general_notes_updated_at, general_notes_updated_by,
 	ad_spend_per_month, paid_ads_go_live_date,
+	integration_hs, integration_iw, integration_acuity, integration_ekyros,
 	csm:csms ( id, name, email, active ),
 	status:statuses!inner ( id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active )
 `;
+
+/** DB column name for each `IntegrationFlag` — the one place that mapping is spelled out (PRD §5/§8). */
+const INTEGRATION_FLAG_COLUMNS: Record<IntegrationFlag, string> = {
+	hs: "integration_hs",
+	iw: "integration_iw",
+	acuity: "integration_acuity",
+	ekyros: "integration_ekyros",
+};
 
 type ClientQueryRow = {
 	id: string;
@@ -28,6 +37,10 @@ type ClientQueryRow = {
 	general_notes_updated_by: string | null;
 	ad_spend_per_month: number | null;
 	paid_ads_go_live_date: string | null;
+	integration_hs: boolean;
+	integration_iw: boolean;
+	integration_acuity: boolean;
+	integration_ekyros: boolean;
 	csm: { id: string; name: string; email: string | null; active: boolean } | null;
 	status: {
 		id: string;
@@ -61,6 +74,12 @@ function mapClient(row: ClientQueryRow): ClientRow {
 		generalNotesUpdatedBy: row.general_notes_updated_by,
 		adSpendPerMonth: row.ad_spend_per_month,
 		paidAdsGoLiveDate: row.paid_ads_go_live_date,
+		integrationFlags: {
+			hs: row.integration_hs,
+			iw: row.integration_iw,
+			acuity: row.integration_acuity,
+			ekyros: row.integration_ekyros,
+		},
 		status: {
 			id: row.status.id,
 			name: row.status.name,
@@ -133,6 +152,21 @@ export async function updatePaidAdsSettings(
 	const { error } = await supabase
 		.from("clients")
 		.update({ ad_spend_per_month: input.adSpendPerMonth, paid_ads_go_live_date: input.goLiveDate })
+		.eq("id", clientId);
+	if (error) throw new Error(error.message);
+	return getClientById(supabase, clientId);
+}
+
+/** Toggles one "which external systems is this center on" checkbox on the Overview card (PRD §5/§8) — manual, independent of any other field. */
+export async function updateClientIntegrationFlag(
+	supabase: SupabaseClient,
+	clientId: string,
+	flag: IntegrationFlag,
+	checked: boolean,
+): Promise<ClientRow | null> {
+	const { error } = await supabase
+		.from("clients")
+		.update({ [INTEGRATION_FLAG_COLUMNS[flag]]: checked })
 		.eq("id", clientId);
 	if (error) throw new Error(error.message);
 	return getClientById(supabase, clientId);

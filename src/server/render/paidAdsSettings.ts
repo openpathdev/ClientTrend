@@ -1,14 +1,10 @@
 import { html } from "hono/html";
 import type { ClientRow } from "../data/types";
+import { formatMonthlySpend } from "./format";
 
 function formatGoLive(date: string | null): string {
 	if (!date) return "—";
 	return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
-}
-
-function formatSpend(value: number | null): string {
-	if (value === null) return "—";
-	return `$${value.toLocaleString("en-US")}`;
 }
 
 /**
@@ -54,7 +50,7 @@ export function renderPaidAdsSettings(client: ClientRow, error?: string) {
 		<div x-data="{ editing: false }" class="rounded-full bg-zebra-row px-2.5 py-1 text-[11px]">
 			<button type="button" x-show="!editing" x-on:click="editing = true" class="flex items-center gap-1 text-muted hover:text-ink">
 				<span class="uppercase tracking-[0.04em]">Ad spend</span>
-				<span class="font-mono text-ink">${formatSpend(client.adSpendPerMonth)} / mo</span>
+				<span class="font-mono text-ink">${formatMonthlySpend(client.adSpendPerMonth)}</span>
 			</button>
 			<form
 				x-show="editing"

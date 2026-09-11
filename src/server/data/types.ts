@@ -26,6 +26,16 @@ export type StateRef = {
 	sortOrder: number;
 };
 
+/** Which external systems a center is on (PRD §5/§8) — manual, per-client toggles shown as checkboxes on the Overview card. Not HubSpot-owned, not derived from any metric. */
+export const INTEGRATION_FLAGS = ["hs", "iw", "acuity", "ekyros"] as const;
+export type IntegrationFlag = (typeof INTEGRATION_FLAGS)[number];
+export const INTEGRATION_FLAG_LABELS: Record<IntegrationFlag, string> = {
+	hs: "HS",
+	iw: "IW",
+	acuity: "Acuity",
+	ekyros: "Ekyros",
+};
+
 export type ClientRow = {
 	id: string;
 	name: string;
@@ -44,6 +54,7 @@ export type ClientRow = {
 	generalNotesUpdatedBy: string | null;
 	adSpendPerMonth: number | null;
 	paidAdsGoLiveDate: string | null;
+	integrationFlags: Record<IntegrationFlag, boolean>;
 };
 
 export type ClientFilters = {

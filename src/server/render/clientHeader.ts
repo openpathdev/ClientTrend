@@ -15,6 +15,24 @@ import { iconPaths } from "../../components/icons/icon-names";
  * Overview card (PRD §19), just re-targeted at this header via
  * `view: "header"` instead of `view: "card"`.
  */
+/** "Last sync failed" indicator (PRD §14/§29) — sits right next to the HubSpot-owned fields it describes (name/website/population/domain authority/CSM all live in this same header), same spot the existing "synced" note already occupies. `hubspotSyncedAt` is the last sync *attempt* time regardless of outcome (both `applyHubspotSync` and `markHubspotSyncStatus` set it), so it's meaningful for the failure cases too, not just success. */
+function renderHubspotSyncIndicator(client: ClientRow) {
+	const lastAttempt = client.hubspotSyncedAt ? new Date(client.hubspotSyncedAt).toLocaleString() : "unknown time";
+
+	if (client.hubspotSyncStatus === "error") {
+		return html`<span class="font-medium text-needs-attention-text" title="Last sync attempt failed ${lastAttempt}">· sync failed</span>`;
+	}
+	if (client.hubspotSyncStatus === "unmatched") {
+		return html`<span class="font-medium text-needs-attention-text" title="Company not found or archived in HubSpot as of ${lastAttempt}"
+			>· not found in HubSpot</span
+		>`;
+	}
+	if (client.hubspotSyncedAt) {
+		return html`<span class="text-muted" title="Synced from HubSpot ${lastAttempt}">· synced</span>`;
+	}
+	return "";
+}
+
 export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 	const site = websiteHref(client.website);
 
@@ -45,13 +63,7 @@ export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 						}
 						<span class="text-muted">·</span>
 						<span class="text-muted">${client.status.name}</span>
-						${
-							client.hubspotSyncedAt
-								? html`<span class="text-muted" title="Synced from HubSpot ${new Date(client.hubspotSyncedAt).toLocaleString()}"
-										>· synced</span
-									>`
-								: ""
-						}
+						${renderHubspotSyncIndicator(client)}
 						${
 							client.hubspotCompanyId
 								? html`<span class="text-muted">·</span>

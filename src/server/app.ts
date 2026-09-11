@@ -29,6 +29,8 @@ import { renderMetricCell, renderCellMarkerButton } from "./render/monthlyDataTa
 import { renderCommentPopover } from "./render/commentPanel";
 import { renderMetricAdminPanel } from "./render/metricAdminPanel";
 import { renderPaidAdsSettings } from "./render/paidAdsSettings";
+import { renderMonthlyDataSection, renderPaidAdsSection } from "./clientDetailSections";
+import { DEFAULT_MONTH_WINDOW } from "./months";
 import { isValidLinkUrl, validateLength, parseMonthlyCellValue } from "./validation";
 import { CHANGE_CATEGORIES, type ChangeCategory, type ClientFilters, type CommentSection, type MonthlyMetricValueType } from "./data/types";
 
@@ -425,6 +427,44 @@ app.patch("/api/clients/:id/paid-ads-settings", async (c) => {
 	const updated = await updatePaidAdsSettings(supabase, clientId, { adSpendPerMonth, goLiveDate });
 	if (!updated) return c.text("Client not found", 404);
 	return c.html(renderPaidAdsSettings(updated));
+});
+
+// ---- "Load earlier months" (PRD §10/§28 — tasks.md's previously-flagged gap) ----
+
+// 20 years — a generous technical ceiling against a malformed/malicious `months`
+// value blowing up `trailingMonths`' array size and the resulting Supabase range
+// query; not meant to be a UX-visible limit (no real client will ever approach it).
+const MAX_MONTH_WINDOW = 240;
+
+function readMonthCount(value: string | undefined): number {
+	const requested = Math.trunc(Number(value));
+	if (!Number.isFinite(requested)) return DEFAULT_MONTH_WINDOW;
+	return Math.min(Math.max(requested, DEFAULT_MONTH_WINDOW), MAX_MONTH_WINDOW);
+}
+
+function readPreviousMonthCount(value: string | undefined): number | undefined {
+	const previous = Math.trunc(Number(value));
+	return Number.isFinite(previous) && previous > 0 ? previous : undefined;
+}
+
+app.get("/api/clients/:id/monthly-data", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const client = await getClientById(supabase, c.req.param("id"));
+	if (!client) return c.text("Client not found", 404);
+	const statuses = await listStatuses(supabase);
+	const monthCount = readMonthCount(c.req.query("months"));
+	const previousMonthCount = readPreviousMonthCount(c.req.query("previousMonths"));
+	return c.html(renderMonthlyDataSection(supabase, client, statuses, monthCount, previousMonthCount));
+});
+
+app.get("/api/clients/:id/paid-ads", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const client = await getClientById(supabase, c.req.param("id"));
+	if (!client) return c.text("Client not found", 404);
+	const statuses = await listStatuses(supabase);
+	const monthCount = readMonthCount(c.req.query("months"));
+	const previousMonthCount = readPreviousMonthCount(c.req.query("previousMonths"));
+	return c.html(renderPaidAdsSection(supabase, client, statuses, monthCount, previousMonthCount));
 });
 
 // ---- Comments (PRD §12), shared by Monthly Data and Paid Ads ----

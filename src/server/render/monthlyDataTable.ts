@@ -1,7 +1,7 @@
 import { html, raw } from "hono/html";
 import type { MonthlyMetric, MonthlyDataValue, CommentSection, Status, Comment } from "../data/types";
 import { formatInteger, formatPercent, truncate } from "./format";
-import { monthLabel } from "../months";
+import { monthLabel, DEFAULT_MONTH_WINDOW } from "../months";
 import { cellKey, domCellKey } from "../cellKey";
 
 const COMMENT_ICON_PATH =
@@ -10,9 +10,13 @@ const COMMENT_ICON_PATH =
 const COMMENT_ICON_PATH_SOLID =
 	'<path d="M20 2H4c-1.103 0-2 .897-2 2v12c0 1.103.897 2 2 2h3v4.434l7.740-4.434H20c1.103 0 2-.897 2-2V4c0-1.103-.897-2-2-2z"/>';
 
+/** Internal `section` enum vs. its URL path segment (PRD §10) — same mapping used by every route under `/api/clients/:id/{monthly-data,paid-ads}/...`. */
+function sectionBasePath(section: CommentSection): string {
+	return section === "monthly_data" ? "monthly-data" : "paid-ads";
+}
+
 function highlightEndpoint(clientId: string, section: CommentSection, metricId: string, month: string): string {
-	const base = section === "monthly_data" ? "monthly-data" : "paid-ads";
-	return `/api/clients/${clientId}/${base}/${metricId}/${month}/highlight`;
+	return `/api/clients/${clientId}/${sectionBasePath(section)}/${metricId}/${month}/highlight`;
 }
 
 function formatReadOnlyValue(metric: MonthlyMetric, dataValue: MonthlyDataValue | undefined): string {
@@ -253,10 +257,27 @@ export function renderMonthlyDataTable(params: {
 	comments: Map<string, Comment[]>;
 	/** Extra content next to the title — used by Paid Ads for the GO-LIVE/AD SPEND chips (PRD §11); Monthly Data leaves this unset. */
 	headerExtra?: ReturnType<typeof html>;
+	/**
+	 * Set only when this render is a "load earlier months" reload (not the
+	 * initial page load) — the month count `months` had *before* this load,
+	 * i.e. how many of the now-larger `months` array are newly-added at the
+	 * left. Without this, the scroll container's `x-init` always re-snaps to
+	 * the newest (rightmost) month on every render — including right after
+	 * clicking "load earlier months," which never changes the newest month,
+	 * so the click would otherwise look like it did nothing. When set, the
+	 * initial scroll position instead lands on the seam between the
+	 * already-seen and newly-loaded columns (centered in the viewport) so
+	 * the load is visibly confirmed (PRD §10, "load earlier months" gap).
+	 */
+	previousMonthCount?: number;
 }) {
-	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra } = params;
+	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra, previousMonthCount } = params;
 	const byKey = new Map(values.map((v) => [cellKey(v.metricId, v.month), v]));
 	const statusesById = new Map(statuses.map((s) => [s.id, s]));
+	const scrollInit =
+		previousMonthCount !== undefined && previousMonthCount > 0 && previousMonthCount < months.length
+			? `$el.scrollLeft = $el.scrollWidth * ${(previousMonthCount / months.length).toFixed(4)} - $el.clientWidth / 2`
+			: "$el.scrollLeft = $el.scrollWidth";
 
 	return html`<section id="${section}-section" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
 		<div class="flex items-center justify-between">
@@ -264,10 +285,21 @@ export function renderMonthlyDataTable(params: {
 				<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>
 				${headerExtra ?? ""}
 			</div>
-			<span class="font-mono text-[11px] text-muted">Last ${String(months.length)} months</span>
+			<div class="flex items-center gap-3">
+				<button
+					type="button"
+					hx-get="/api/clients/${clientId}/${sectionBasePath(section)}?months=${String(months.length + DEFAULT_MONTH_WINDOW)}&previousMonths=${String(months.length)}"
+					hx-target="#${section}-section"
+					hx-swap="outerHTML"
+					class="font-mono text-[11px] font-medium text-link hover:underline"
+				>
+					Load earlier months
+				</button>
+				<span class="font-mono text-[11px] text-muted">Last ${String(months.length)} months</span>
+			</div>
 		</div>
 
-		<div class="mt-3 overflow-x-auto rounded-lg border border-section-rule" x-data x-init="$el.scrollLeft = $el.scrollWidth">
+		<div class="mt-3 overflow-x-auto rounded-lg border border-section-rule" x-data x-init="${scrollInit}">
 			<table class="w-full border-collapse">
 				<thead>
 					<tr>

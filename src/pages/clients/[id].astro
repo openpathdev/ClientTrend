@@ -8,18 +8,12 @@ import { getClientById } from "../../server/data/clients";
 import { listStatuses } from "../../server/data/statuses";
 import { listChanges } from "../../server/data/changes";
 import { listLinks } from "../../server/data/links";
-import { listMonthlyMetrics } from "../../server/data/monthlyMetrics";
-import { listMonthlyDataValues } from "../../server/data/monthlyData";
-import { listPaidAdsMetrics } from "../../server/data/paidAdsMetrics";
-import { listPaidAdsDataValues } from "../../server/data/paidAdsData";
-import { listCommentsForRange } from "../../server/data/comments";
-import { trailingMonths, DEFAULT_MONTH_WINDOW } from "../../server/months";
+import { DEFAULT_MONTH_WINDOW } from "../../server/months";
 import { renderClientHeader } from "../../server/render/clientHeader";
 import { renderNotesSection } from "../../server/render/notesSection";
 import { renderChangesSection } from "../../server/render/changesSection";
 import { renderLinksSection } from "../../server/render/linksSection";
-import { renderMonthlyDataTable } from "../../server/render/monthlyDataTable";
-import { renderPaidAdsSettings } from "../../server/render/paidAdsSettings";
+import { renderMonthlyDataSection, renderPaidAdsSection } from "../../server/clientDetailSections";
 import { isValidUuid } from "../../server/validation";
 
 const { id } = Astro.params;
@@ -38,49 +32,20 @@ let monthlyDataHtml = "";
 let paidAdsHtml = "";
 
 if (client) {
-	const months = trailingMonths(DEFAULT_MONTH_WINDOW);
-	const [statuses, changes, links, monthlyMetrics, monthlyValues, monthlyComments, paidAdsMetrics, paidAdsValues, paidAdsComments] =
-		await Promise.all([
-			listStatuses(supabase),
-			listChanges(supabase, client.id),
-			listLinks(supabase, client.id),
-			listMonthlyMetrics(supabase),
-			listMonthlyDataValues(supabase, client.id, months[0], months[months.length - 1]),
-			listCommentsForRange(supabase, client.id, "monthly_data", months[0], months[months.length - 1]),
-			listPaidAdsMetrics(supabase),
-			listPaidAdsDataValues(supabase, client.id, months[0], months[months.length - 1]),
-			listCommentsForRange(supabase, client.id, "paid_ads", months[0], months[months.length - 1]),
-		]);
+	const [statuses, changes, links] = await Promise.all([
+		listStatuses(supabase),
+		listChanges(supabase, client.id),
+		listLinks(supabase, client.id),
+	]);
 
 	headerHtml = (await renderClientHeader(client, statuses)).toString();
 	notesHtml = (await renderNotesSection(client)).toString();
 	changesHtml = (await renderChangesSection(client.id, changes)).toString();
 	linksHtml = (await renderLinksSection(client.id, links)).toString();
-	monthlyDataHtml = (
-		await renderMonthlyDataTable({
-			clientId: client.id,
-			section: "monthly_data",
-			title: "Performance",
-			metrics: monthlyMetrics,
-			months,
-			values: monthlyValues,
-			statuses,
-			comments: monthlyComments,
-		})
-	).toString();
-	paidAdsHtml = (
-		await renderMonthlyDataTable({
-			clientId: client.id,
-			section: "paid_ads",
-			title: "Paid Ads",
-			metrics: paidAdsMetrics,
-			months,
-			values: paidAdsValues,
-			statuses,
-			comments: paidAdsComments,
-			headerExtra: await renderPaidAdsSettings(client),
-		})
-	).toString();
+	[monthlyDataHtml, paidAdsHtml] = await Promise.all([
+		renderMonthlyDataSection(supabase, client, statuses, DEFAULT_MONTH_WINDOW),
+		renderPaidAdsSection(supabase, client, statuses, DEFAULT_MONTH_WINDOW),
+	]);
 }
 ---
 

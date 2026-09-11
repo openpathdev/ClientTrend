@@ -31,7 +31,7 @@ function renderLinkItem(clientId: string, link: Link) {
 						hx-swap="outerHTML"
 						class="font-medium text-needs-attention-text hover:underline"
 					>
-						Yes, delete
+						Confirm
 					</button>
 					<button type="button" x-on:click="confirming = false" class="font-medium text-muted hover:underline">Cancel</button>
 				</span>

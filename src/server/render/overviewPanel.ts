@@ -2,7 +2,7 @@ import { html } from "hono/html";
 import type { ClientFilters, ClientRow, Csm, StateRef, Status } from "../data/types";
 import { renderClientCard } from "./card";
 
-function filterQuery(filters: ClientFilters, overrides: Partial<ClientFilters> = {}) {
+export function filterQuery(filters: ClientFilters, overrides: Partial<ClientFilters> = {}) {
 	const merged = { ...filters, ...overrides };
 	const params = new URLSearchParams();
 	if (merged.csmId) params.set("csm", merged.csmId);

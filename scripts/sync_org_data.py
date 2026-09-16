@@ -30,6 +30,34 @@ than one candidate existed were confirmed with the client (2026-08-28/29):
     with submitted=True — PROVISIONAL, not one of the original 8 metrics,
     proposed by us and not yet explicitly confirmed.
 
+Also opportunistically fills the existing "Form Fills" manual metric
+(catalog key `form_fills`) — 2026-09-16 user decision — but ONLY for centers
+that show ANY evidence of HubSpot form engagement anywhere in their whole
+file (checked once against the whole file, not per month, so a genuinely
+quiet month doesn't get mistaken for "this center doesn't use HubSpot's own
+form tracking" and left blank). Centers with zero evidence anywhere in their
+history are left alone entirely for this one metric — it stays a normal
+always-editable manual field for them, exactly as it already was before this
+change. Once a center qualifies, HubSpot data wins every run, same as the
+other 8 metrics — this can overwrite an existing manually-typed value for
+that month. `form_fills` stays `value_type='text'` in the catalog (no
+migration needed): manual-sourced cells always render via `value_text`
+regardless of value_type, and this script already writes both
+`value`/`value_text` for every key it touches, so folding this metric into
+the same upsert path required no schema change at all.
+
+**Corrected 2026-09-16** (found via a real cross-check against a second app
+using the same file, for ABC Life Choices/July): `form_fills` counts
+`isFormSession=True` sessions (any session that engaged with/opened the
+form widget), NOT `submitted=True` (sessions that actually completed
+submission) — `submitted` was the original, too-strict choice; confirmed
+live that `submitted` is a strict subset of `isFormSession` for the same
+month (10 of 18), i.e. the difference is real incomplete/abandoned form
+starts, not a bucketing or timezone bug. `hubspot_submission_clients` above
+is unaffected by this — it's a separate, already-established metric and
+still deliberately uses `submitted` (distinct clients who actually
+completed a submission), not `isFormSession`.
+
 Usage:
     python3 scripts/sync_org_data.py --client-id <supabase-client-uuid> [--months 12] [--dry-run]
 
@@ -241,6 +269,14 @@ def compute_month_metrics(sessions: list, month: str) -> dict:
 	submission_sessions = [s for s in month_sessions if s.get("submitted")]
 	hubspot_submission_clients = len(_distinct_client_ids(submission_sessions))
 
+	# Form *engagement*, not completed submission (2026-09-16 correction) —
+	# a session that opened/started the form widget, whether or not it was
+	# ever actually submitted. Deliberately NOT `submission_sessions` above:
+	# confirmed live (ABC Life Choices, July) that `submitted` underreports
+	# vs. a second app reading the same file, because that app counts every
+	# form-engaged session, including abandoned/incomplete ones.
+	form_engaged_sessions = [s for s in month_sessions if s.get("isFormSession")]
+
 	return {
 		"unique_visitors": unique_visitors,
 		"widget_clicks": widget_clicks,
@@ -251,6 +287,10 @@ def compute_month_metrics(sessions: list, month: str) -> dict:
 		"am_ad": am_ad,
 		"av_am_ad": av_am_ad,
 		"hubspot_submission_clients": hubspot_submission_clients,
+		# Only kept in the final upload if this center shows any HubSpot form
+		# engagement at all; see `has_form_submissions` in main(). Always
+		# computed here since it's free.
+		"form_fills": len(form_engaged_sessions),
 	}
 
 
@@ -285,7 +325,10 @@ def main():
 		print(f"Error: client {client['name']} has no hubspot_company_id set", file=sys.stderr)
 		sys.exit(1)
 
-	metrics_catalog = supabase_get("monthly_metrics?source=eq.hubspot&select=id,key")
+	# Not filtered to source=eq.hubspot — also need form_fills' id, a manual
+	# metric this script opportunistically fills in when it can (see module
+	# docstring). Small catalog table either way, cheap to fetch in full.
+	metrics_catalog = supabase_get("monthly_metrics?select=id,key")
 	metric_id_by_key = {m["key"]: m["id"] for m in metrics_catalog}
 
 	missing_keys = set(compute_month_metrics([], trailing_months(1)[0]).keys()) - set(metric_id_by_key.keys())
@@ -297,10 +340,23 @@ def main():
 	sessions = org_data.get("sessions", [])
 	print(f"Loaded {len(sessions)} sessions for {client['name']} ({hubspot_company_id})", file=sys.stderr)
 
+	# Whole-file check, not per-month (2026-09-16 decision) — a center that
+	# genuinely uses HubSpot's own form tracking can still have a real
+	# zero-engagement month; only the complete absence of ANY isFormSession
+	# session anywhere in their history means "this center uses a different
+	# 3rd-party form system," in which case form_fills stays fully manual.
+	has_form_submissions = any(s.get("isFormSession") for s in sessions)
+	print(
+		f"  HubSpot form-submission tracking: {'yes, will auto-fill form_fills' if has_form_submissions else 'no evidence found, form_fills stays manual'}",
+		file=sys.stderr,
+	)
+
 	months = trailing_months(args.months)
 	rows = []
 	for month in months:
 		values = compute_month_metrics(sessions, month)
+		if not has_form_submissions:
+			del values["form_fills"]
 		print(f"  {month}: {values}", file=sys.stderr)
 		for key, value in values.items():
 			rows.append({

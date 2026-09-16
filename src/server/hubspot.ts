@@ -127,6 +127,31 @@ function eligibilityFromLineItemNames(names: Set<string>): SubscriptionEligibili
 	};
 }
 
+function unionEligibility(a: SubscriptionEligibility, b: SubscriptionEligibility): SubscriptionEligibility {
+	return {
+		purchasedProWebsite: a.purchasedProWebsite || b.purchasedProWebsite,
+		purchasedBaseWebsite: a.purchasedBaseWebsite || b.purchasedBaseWebsite,
+	};
+}
+
+/**
+ * Companies with a real Subscription (so the zero-Subscriptions Deal
+ * fallback below never fires) whose actual website-product purchase
+ * nonetheless lives on a separate closed-won Deal instead — either because
+ * their only Subscription is for an unrelated product (Divine Fountain of
+ * Hope: an active "Website: Donor Site Package" subscription, with Pro
+ * bought separately as a Deal) or because their website Subscription was
+ * since canceled while the original Deal sale still stands (Adira Clinic).
+ * Hardcoded per-company (2026-09-16 decision) rather than always checking
+ * Deals for every client, which would roughly double HubSpot API calls per
+ * client and force a smaller sync `BATCH_SIZE` — same tradeoff already made
+ * for `CSM_OWNER_ID_ALIASES` in csms.ts.
+ */
+const DEAL_FALLBACK_COMPANY_IDS = new Set([
+	"31272825243", // Divine Fountain of Hope
+	"57248610400", // Adira Clinic
+]);
+
 /**
  * Determines website-product eligibility from a company's actual HubSpot
  * commerce data (Subscriptions → Line Items), NOT the manually-maintained
@@ -164,16 +189,26 @@ function eligibilityFromLineItemNames(names: Set<string>): SubscriptionEligibili
  * Pregnancy Center, 2026-09-16 — pays annually via a Deal instead of a
  * recurring monthly Subscription) falls back to `fetchDealBasedEligibility`
  * below, adding up to ~4 more calls but only for that no-subscriptions
- * case, not the common path.
+ * case, not the common path. `DEAL_FALLBACK_COMPANY_IDS` extends that same
+ * Deal check to a couple of specific companies that DO have Subscriptions
+ * but still need it — see that constant's comment.
  */
 export async function fetchSubscriptionEligibility(env: CloudflareBindings, hubspotCompanyId: string): Promise<SubscriptionEligibility> {
-	const none: SubscriptionEligibility = { purchasedProWebsite: false, purchasedBaseWebsite: false };
-
 	const assocRes = await hubspotFetch(env, `/crm/v4/objects/companies/${hubspotCompanyId}/associations/subscriptions`);
 	if (!assocRes.ok) throw new Error(`Subscription associations fetch failed: HTTP ${assocRes.status}`);
 	const assocBody = (await assocRes.json()) as { results: { toObjectId: number }[] };
 	const subscriptionIds = assocBody.results.map((r) => String(r.toObjectId));
 	if (subscriptionIds.length === 0) return fetchDealBasedEligibility(env, hubspotCompanyId);
+
+	const subscriptionEligibility = await fetchSubscriptionOnlyEligibility(env, subscriptionIds);
+	if (!DEAL_FALLBACK_COMPANY_IDS.has(hubspotCompanyId)) return subscriptionEligibility;
+
+	const dealEligibility = await fetchDealBasedEligibility(env, hubspotCompanyId);
+	return unionEligibility(subscriptionEligibility, dealEligibility);
+}
+
+async function fetchSubscriptionOnlyEligibility(env: CloudflareBindings, subscriptionIds: string[]): Promise<SubscriptionEligibility> {
+	const none: SubscriptionEligibility = { purchasedProWebsite: false, purchasedBaseWebsite: false };
 
 	const statusRes = await hubspotFetch(env, "/crm/v3/objects/subscriptions/batch/read", {
 		method: "POST",

@@ -112,7 +112,20 @@ export async function fetchCompanySyncProperties(env: CloudflareBindings, hubspo
 
 export type SubscriptionEligibility = { purchasedProWebsite: boolean; purchasedBaseWebsite: boolean };
 
-const WEBSITE_LINE_ITEM_NAMES = new Set(["Website: Pro Package", "Website: Base Package"]);
+const WEBSITE_LINE_ITEM_NAMES = new Set(["Website: Pro Package", "Website: Base Package", "Website Package", "PC Website Package"]);
+
+/** Annual-Deal line items carry a " (Annual)" suffix on the same base name (e.g. "Website: Pro Package (Annual)") — stripped before matching against `WEBSITE_LINE_ITEM_NAMES` so both billing models share one name list. */
+const ANNUAL_SUFFIX = " (Annual)";
+function stripAnnualSuffix(name: string): string {
+	return name.endsWith(ANNUAL_SUFFIX) ? name.slice(0, -ANNUAL_SUFFIX.length) : name;
+}
+
+function eligibilityFromLineItemNames(names: Set<string>): SubscriptionEligibility {
+	return {
+		purchasedProWebsite: names.has("Website: Pro Package") || names.has("Website Package") || names.has("PC Website Package"),
+		purchasedBaseWebsite: names.has("Website: Base Package"),
+	};
+}
 
 /**
  * Determines website-product eligibility from a company's actual HubSpot
@@ -123,11 +136,22 @@ const WEBSITE_LINE_ITEM_NAMES = new Set(["Website: Pro Package", "Website: Base 
  * set despite an active subscription, AND finding a third — Alpha
  * Women's Center — where the property said "Pro" but its actual
  * subscription's line items only contained "Website: Base Package").
- * Only ACTIVE subscriptions count; only the exact line-item names
+ * Only ACTIVE or UNPAID subscriptions count (2026-09-16 decision — unpaid
+ * still reflects a real, current purchase, just one with a billing issue,
+ * so it should keep counting toward eligibility); PAUSED and other
+ * inactive statuses do not. Only the exact line-item names
  * "Website: Pro Package"/"Website: Base Package" count — every other
  * line item (add-ons, grants, PPC, etc.) is disregarded per the user's
  * explicit instruction, even though a subscription's own `hs_name` often
  * only shows one bundled item plus "+ N more" and can't be trusted alone.
+ * "Website Package" (no colon, no SKU) is the pre-split legacy product
+ * name (predates the "Website: Pro/Base Package" SKUs 035/034) and is
+ * treated as equivalent to Pro (2026-09-16 decision, e.g. Informed
+ * Choices Medical Clinic). "PC Website Package" is a separate,
+ * client-specific naming variant (Birth Choice, 2026-09-16) also treated
+ * as equivalent to Pro — kept as its own set entry rather than merged into
+ * "Website Package" in case other one-off variants turn out to mean
+ * something else later.
  *
  * Uses batch-read endpoints throughout (subscriptions batch/read, the v4
  * batch associations endpoint, line_items batch/read) specifically to
@@ -135,6 +159,12 @@ const WEBSITE_LINE_ITEM_NAMES = new Set(["Website: Pro Package", "Website: Base 
  * subscriptions/line items exist — Cloudflare's per-invocation subrequest
  * ceiling was already hit once during the bulk-import backfill, and this
  * check runs on every sync/import, so per-company call count matters.
+ *
+ * A company with ZERO Subscription associations (e.g. Hope For Life
+ * Pregnancy Center, 2026-09-16 — pays annually via a Deal instead of a
+ * recurring monthly Subscription) falls back to `fetchDealBasedEligibility`
+ * below, adding up to ~4 more calls but only for that no-subscriptions
+ * case, not the common path.
  */
 export async function fetchSubscriptionEligibility(env: CloudflareBindings, hubspotCompanyId: string): Promise<SubscriptionEligibility> {
 	const none: SubscriptionEligibility = { purchasedProWebsite: false, purchasedBaseWebsite: false };
@@ -143,22 +173,26 @@ export async function fetchSubscriptionEligibility(env: CloudflareBindings, hubs
 	if (!assocRes.ok) throw new Error(`Subscription associations fetch failed: HTTP ${assocRes.status}`);
 	const assocBody = (await assocRes.json()) as { results: { toObjectId: number }[] };
 	const subscriptionIds = assocBody.results.map((r) => String(r.toObjectId));
-	if (subscriptionIds.length === 0) return none;
+	if (subscriptionIds.length === 0) return fetchDealBasedEligibility(env, hubspotCompanyId);
 
 	const statusRes = await hubspotFetch(env, "/crm/v3/objects/subscriptions/batch/read", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ properties: ["hs_is_status_active"], inputs: subscriptionIds.map((id) => ({ id })) }),
+		body: JSON.stringify({ properties: ["hs_is_status_active", "hs_status"], inputs: subscriptionIds.map((id) => ({ id })) }),
 	});
 	if (!statusRes.ok) throw new Error(`Subscription batch read failed: HTTP ${statusRes.status}`);
-	const statusBody = (await statusRes.json()) as { results: { id: string; properties: { hs_is_status_active: string | null } }[] };
-	const activeSubscriptionIds = statusBody.results.filter((r) => r.properties.hs_is_status_active === "1").map((r) => r.id);
-	if (activeSubscriptionIds.length === 0) return none;
+	const statusBody = (await statusRes.json()) as {
+		results: { id: string; properties: { hs_is_status_active: string | null; hs_status: string | null } }[];
+	};
+	const eligibleSubscriptionIds = statusBody.results
+		.filter((r) => r.properties.hs_is_status_active === "1" || r.properties.hs_status === "unpaid")
+		.map((r) => r.id);
+	if (eligibleSubscriptionIds.length === 0) return none;
 
 	const lineItemAssocRes = await hubspotFetch(env, "/crm/v4/associations/subscriptions/line_items/batch/read", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ inputs: activeSubscriptionIds.map((id) => ({ id })) }),
+		body: JSON.stringify({ inputs: eligibleSubscriptionIds.map((id) => ({ id })) }),
 	});
 	if (!lineItemAssocRes.ok) throw new Error(`Subscription line-item associations batch read failed: HTTP ${lineItemAssocRes.status}`);
 	const lineItemAssocBody = (await lineItemAssocRes.json()) as { results: { from: { id: string }; to: { toObjectId: number }[] }[] };
@@ -172,10 +206,71 @@ export async function fetchSubscriptionEligibility(env: CloudflareBindings, hubs
 	});
 	if (!lineItemRes.ok) throw new Error(`Line item batch read failed: HTTP ${lineItemRes.status}`);
 	const lineItemBody = (await lineItemRes.json()) as { results: { properties: { name: string | null } }[] };
-	const names = new Set(lineItemBody.results.map((r) => r.properties.name).filter((n): n is string => n !== null && WEBSITE_LINE_ITEM_NAMES.has(n)));
+	const names = new Set(
+		lineItemBody.results
+			.map((r) => r.properties.name)
+			.filter((n): n is string => n !== null)
+			.map(stripAnnualSuffix)
+			.filter((n) => WEBSITE_LINE_ITEM_NAMES.has(n)),
+	);
 
-	return {
-		purchasedProWebsite: names.has("Website: Pro Package"),
-		purchasedBaseWebsite: names.has("Website: Base Package"),
-	};
+	return eligibilityFromLineItemNames(names);
+}
+
+/**
+ * Fallback for companies with zero Subscription associations — the same
+ * website-product check, but sourced from closed-won Deals → Line Items
+ * instead (2026-09-16 decision, Hope For Life Pregnancy Center: they pay
+ * annually via a Deal rather than a recurring Subscription, so the normal
+ * path above always finds nothing). Any closed-won deal counts, with no
+ * expiry check against the line item's billing period — deals don't carry
+ * an ongoing status the way subscriptions do, and per the user's explicit
+ * instruction this is treated as a deliberate simplification rather than
+ * computing a lapse date from `hs_recurring_billing_period`.
+ */
+async function fetchDealBasedEligibility(env: CloudflareBindings, hubspotCompanyId: string): Promise<SubscriptionEligibility> {
+	const none: SubscriptionEligibility = { purchasedProWebsite: false, purchasedBaseWebsite: false };
+
+	const assocRes = await hubspotFetch(env, `/crm/v4/objects/companies/${hubspotCompanyId}/associations/deals`);
+	if (!assocRes.ok) throw new Error(`Deal associations fetch failed: HTTP ${assocRes.status}`);
+	const assocBody = (await assocRes.json()) as { results: { toObjectId: number }[] };
+	const dealIds = assocBody.results.map((r) => String(r.toObjectId));
+	if (dealIds.length === 0) return none;
+
+	const statusRes = await hubspotFetch(env, "/crm/v3/objects/deals/batch/read", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ properties: ["hs_is_closed_won"], inputs: dealIds.map((id) => ({ id })) }),
+	});
+	if (!statusRes.ok) throw new Error(`Deal batch read failed: HTTP ${statusRes.status}`);
+	const statusBody = (await statusRes.json()) as { results: { id: string; properties: { hs_is_closed_won: string | null } }[] };
+	const closedWonDealIds = statusBody.results.filter((r) => r.properties.hs_is_closed_won === "true").map((r) => r.id);
+	if (closedWonDealIds.length === 0) return none;
+
+	const lineItemAssocRes = await hubspotFetch(env, "/crm/v4/associations/deals/line_items/batch/read", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ inputs: closedWonDealIds.map((id) => ({ id })) }),
+	});
+	if (!lineItemAssocRes.ok) throw new Error(`Deal line-item associations batch read failed: HTTP ${lineItemAssocRes.status}`);
+	const lineItemAssocBody = (await lineItemAssocRes.json()) as { results: { from: { id: string }; to: { toObjectId: number }[] }[] };
+	const lineItemIds = [...new Set(lineItemAssocBody.results.flatMap((r) => r.to.map((t) => String(t.toObjectId))))];
+	if (lineItemIds.length === 0) return none;
+
+	const lineItemRes = await hubspotFetch(env, "/crm/v3/objects/line_items/batch/read", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ properties: ["name"], inputs: lineItemIds.map((id) => ({ id })) }),
+	});
+	if (!lineItemRes.ok) throw new Error(`Line item batch read failed: HTTP ${lineItemRes.status}`);
+	const lineItemBody = (await lineItemRes.json()) as { results: { properties: { name: string | null } }[] };
+	const names = new Set(
+		lineItemBody.results
+			.map((r) => r.properties.name)
+			.filter((n): n is string => n !== null)
+			.map(stripAnnualSuffix)
+			.filter((n) => WEBSITE_LINE_ITEM_NAMES.has(n)),
+	);
+
+	return eligibilityFromLineItemNames(names);
 }

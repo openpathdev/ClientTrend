@@ -15,11 +15,11 @@ function formatDate(iso: string): string {
  */
 function renderChangeItem(clientId: string, change: Change) {
 	return html`<div x-data="{ editing: false, confirming: false }" class="group border-b border-row-rule py-2.5 last:border-b-0">
-		<div x-show="!editing" class="flex items-baseline gap-3">
-			<span class="w-20 shrink-0 font-mono text-[12px] text-muted">${formatDate(change.changeDate)}</span>
-			<p class="min-w-0 flex-1 truncate text-[13.5px] text-ink" title="${change.description}">${change.description}</p>
-			<span class="shrink-0 text-[12px] text-muted">${change.createdBy}</span>
-			<span class="hidden shrink-0 items-center gap-2 text-[11px] group-hover:flex group-focus-within:flex">
+		<div x-show="!editing" class="flex items-start gap-3">
+			<span class="w-20 shrink-0 pt-0.5 font-mono text-[12px] text-muted">${formatDate(change.changeDate)}</span>
+			<p class="min-w-0 flex-1 whitespace-pre-wrap break-words pt-0.5 text-[13.5px] text-ink">${change.description}</p>
+			<span class="shrink-0 pt-0.5 text-[12px] text-muted">${change.createdBy}</span>
+			<span class="hidden shrink-0 items-center gap-2 pt-0.5 text-[11px] group-hover:flex group-focus-within:flex">
 				<button type="button" x-on:click="editing = true" class="font-medium text-link hover:underline">Edit</button>
 				<button type="button" x-show="!confirming" x-on:click="confirming = true" class="font-medium text-needs-attention-text hover:underline">
 					Delete

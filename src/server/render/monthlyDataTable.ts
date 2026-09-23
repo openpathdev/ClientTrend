@@ -228,7 +228,7 @@ export function renderMetricCell(
 			name="value"
 			value="${rawValue}"
 			maxlength="500"
-			hx-put="/api/clients/${clientId}/monthly-data/${metric.id}/${month}"
+			hx-put="/api/clients/${clientId}/${sectionBasePath(section)}/${metric.id}/${month}"
 			hx-trigger="change, keyup[key=='Enter']"
 			hx-target="closest td"
 			hx-swap="outerHTML"

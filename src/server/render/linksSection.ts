@@ -10,7 +10,6 @@ function renderLinkItem(clientId: string, link: Link) {
 				>
 				${link.category ? html`<span class="rounded-full bg-zebra-row px-2 py-0.5 text-[11px] text-muted">${link.category}</span>` : ""}
 			</div>
-			<div class="font-mono text-[11.5px] text-muted">${link.url}</div>
 			${link.description ? html`<p class="mt-1 whitespace-pre-wrap text-[13px] text-ink">${link.description}</p>` : ""}
 			<div class="mt-1.5 flex items-center gap-3">
 				<button type="button" x-on:click="editing = true" class="text-[11.5px] font-medium text-link hover:underline">Edit</button>

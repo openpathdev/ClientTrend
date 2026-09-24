@@ -99,7 +99,7 @@ export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true"
 					>${raw(iconPaths.user)}</svg
 				>
-				${client.csm ? client.csm.name : "Unassigned"}
+				${client.csm ? client.csm.name : html`<span class="font-bold text-needs-attention-text">Update CSM in Hubspot</span>`}
 			</span>
 		</div>
 

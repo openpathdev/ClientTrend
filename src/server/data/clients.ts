@@ -98,23 +98,27 @@ function mapClient(row: ClientQueryRow): ClientRow {
 /**
  * Baseline visibility rule for the Overview page (2026-08-28 user decision,
  * not user-togglable): only clients whose CSM is one of the currently
- * active roster AND who have purchased one of the 2 real website product
- * tiers (Pro or Base — NOT the generic/legacy `purchased_website` flag)
- * ever show on the card grid. The active-CSM-roster approach (rather than
- * hardcoding specific ids) means adding a new CSM later (e.g. "Laura",
- * not yet in HubSpot as of this decision) automatically includes their
- * clients the moment that CSM is synced and marked active — no code change
- * needed. This filter does NOT apply to `getClientById` — a client is still
+ * active roster (or has no CSM at all — e.g. the `csm` property is blank
+ * in HubSpot, 2026-09-24 decision — rather than assigned to a since-departed
+ * CSM) AND who have purchased one of the 2 real website product tiers (Pro
+ * or Base — NOT the generic/legacy `purchased_website` flag) ever show on
+ * the card grid. The active-CSM-roster approach (rather than hardcoding
+ * specific ids) means adding a new CSM later (e.g. "Laura", not yet in
+ * HubSpot as of this decision) automatically includes their clients the
+ * moment that CSM is synced and marked active — no code change needed.
+ * This filter does NOT apply to `getClientById` — a client is still
  * directly reachable by URL regardless of this rule.
  */
 export async function listClients(supabase: SupabaseClient, filters: ClientFilters = {}): Promise<ClientRow[]> {
 	const activeCsms = await listCsms(supabase);
 	const activeCsmIds = activeCsms.map((c) => c.id);
+	const csmVisibility =
+		activeCsmIds.length > 0 ? `csm_id.in.(${activeCsmIds.join(",")}),csm_id.is.null` : "csm_id.is.null";
 
 	let query = supabase
 		.from("clients")
 		.select(CLIENT_SELECT)
-		.in("csm_id", activeCsmIds.length > 0 ? activeCsmIds : ["00000000-0000-0000-0000-000000000000"])
+		.or(csmVisibility)
 		.or("hubspot_purchased_pro_website.eq.true,hubspot_purchased_base_website.eq.true")
 		.order("name", { ascending: true });
 

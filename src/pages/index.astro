@@ -37,12 +37,31 @@ const accountCount = clients.length;
 				<h1 class="font-sans text-[26px] font-semibold tracking-[-0.02em] text-ink">Client Trends</h1>
 				<p class="mt-1 font-mono text-[13px] text-muted">{accountCount} account{accountCount === 1 ? "" : "s"}</p>
 			</div>
-			<a
-				href="/admin/import"
-				class="shrink-0 rounded-md bg-selected-filter px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90"
-			>
-				+ Add Client
-			</a>
+			<div class="flex shrink-0 items-center gap-3">
+				<span id="hubspot-sync-status" class="text-[12px] text-muted"></span>
+				<button
+					type="button"
+					hx-post="/api/admin/hubspot-sync/trigger"
+					hx-target="#hubspot-sync-status"
+					hx-swap="innerHTML"
+					hx-indicator="#hubspot-sync-loading"
+					class="flex items-center gap-1.5 rounded-md border border-card-border bg-surface px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-zebra-row"
+				>
+					<span
+						id="hubspot-sync-loading"
+						class="htmx-indicator inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-card-border border-t-ink"
+						role="status"
+						aria-label="Syncing"
+					></span>
+					Sync HubSpot
+				</button>
+				<a
+					href="/admin/import"
+					class="rounded-md bg-selected-filter px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90"
+				>
+					+ Add Client
+				</a>
+			</div>
 		</header>
 
 		<Fragment set:html={panelHtml} />

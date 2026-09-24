@@ -732,6 +732,25 @@ app.post("/api/admin/hubspot-sync/run", async (c) => {
 	return c.json(result);
 });
 
+/**
+ * Manual "Sync HubSpot" button next to + Add Client on the Overview page
+ * (PRD §14) — same sync as the nightly cron, just kicked off by an
+ * Access-authenticated user instead of the external cron's shared-secret
+ * call. Fires the existing self-chaining `/run` endpoint (batches continue
+ * via its own `waitUntil` chain) and returns immediately so the button
+ * isn't blocked on the full multi-batch sync, which can take a minute-plus.
+ */
+app.post("/api/admin/hubspot-sync/trigger", async (c) => {
+	const runUrl = new URL("/api/admin/hubspot-sync/run", c.req.url);
+	c.executionCtx.waitUntil(
+		fetch(runUrl.toString(), {
+			method: "POST",
+			headers: { "X-Sync-Secret": c.env.HUBSPOT_SYNC_SECRET, Origin: runUrl.origin },
+		}),
+	);
+	return c.html(html`<span class="text-[12px] text-muted">Sync started — running in the background.</span>`);
+});
+
 type HubspotWebhookEvent = {
 	subscriptionType?: string;
 	objectId?: number | string;

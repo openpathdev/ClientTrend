@@ -45,11 +45,11 @@ const accountCount = clients.length;
 					hx-target="#hubspot-sync-status"
 					hx-swap="innerHTML"
 					hx-indicator="#hubspot-sync-loading"
-					class="flex items-center gap-1.5 rounded-md border border-card-border bg-surface px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-zebra-row"
+					class="relative flex items-center justify-center rounded-md border border-card-border bg-surface px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-zebra-row"
 				>
 					<span
 						id="hubspot-sync-loading"
-						class="htmx-indicator inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-card-border border-t-ink"
+						class="htmx-indicator absolute left-2.5 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-card-border border-t-ink"
 						role="status"
 						aria-label="Syncing"
 					></span>

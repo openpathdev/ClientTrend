@@ -54,6 +54,7 @@ export type ClientRow = {
 	generalNotesUpdatedBy: string | null;
 	adSpendPerMonth: number | null;
 	paidAdsGoLiveDate: string | null;
+	goLiveDate: string | null;
 	integrationFlags: Record<IntegrationFlag, boolean>;
 };
 

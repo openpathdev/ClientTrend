@@ -7,7 +7,7 @@ const CLIENT_SELECT = `
 	id, name, website, population, domain_authority, legal_status, state_code,
 	hubspot_company_id, hubspot_sync_status, hubspot_synced_at,
 	general_notes, general_notes_updated_at, general_notes_updated_by,
-	ad_spend_per_month, paid_ads_go_live_date,
+	ad_spend_per_month, paid_ads_go_live_date, go_live_date,
 	integration_hs, integration_iw, integration_acuity, integration_ekyros,
 	csm:csms ( id, name, email, active ),
 	status:statuses!inner ( id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active )
@@ -37,6 +37,7 @@ type ClientQueryRow = {
 	general_notes_updated_by: string | null;
 	ad_spend_per_month: number | null;
 	paid_ads_go_live_date: string | null;
+	go_live_date: string | null;
 	integration_hs: boolean;
 	integration_iw: boolean;
 	integration_acuity: boolean;
@@ -74,6 +75,7 @@ function mapClient(row: ClientQueryRow): ClientRow {
 		generalNotesUpdatedBy: row.general_notes_updated_by,
 		adSpendPerMonth: row.ad_spend_per_month,
 		paidAdsGoLiveDate: row.paid_ads_go_live_date,
+		goLiveDate: row.go_live_date,
 		integrationFlags: {
 			hs: row.integration_hs,
 			iw: row.integration_iw,
@@ -157,6 +159,17 @@ export async function updatePaidAdsSettings(
 		.from("clients")
 		.update({ ad_spend_per_month: input.adSpendPerMonth, paid_ads_go_live_date: input.goLiveDate })
 		.eq("id", clientId);
+	if (error) throw new Error(error.message);
+	return getClientById(supabase, clientId);
+}
+
+/** Manually-entered Go-live Date shown in the client detail header — not HubSpot-owned, distinct from the Paid Ads go-live date. */
+export async function updateClientGoLiveDate(
+	supabase: SupabaseClient,
+	clientId: string,
+	goLiveDate: string | null,
+): Promise<ClientRow | null> {
+	const { error } = await supabase.from("clients").update({ go_live_date: goLiveDate }).eq("id", clientId);
 	if (error) throw new Error(error.message);
 	return getClientById(supabase, clientId);
 }

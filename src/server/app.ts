@@ -10,6 +10,7 @@ import {
 	updateClientStatus,
 	updateGeneralNotes,
 	updatePaidAdsSettings,
+	updateClientGoLiveDate,
 	updateClientIntegrationFlag,
 	getClientById,
 } from "./data/clients";
@@ -137,6 +138,22 @@ app.post("/api/clients/:id/hubspot-unlink", async (c) => {
 	const clientId = c.req.param("id");
 	await unlinkHubspotClient(supabase, clientId);
 	const [updated, statuses] = await Promise.all([getClientById(supabase, clientId), listStatuses(supabase)]);
+	if (!updated) return c.text("Client not found", 404);
+	return c.html(renderClientHeader(updated, statuses));
+});
+
+/** Manually-entered Go-live Date under the CSM chip in the client header. Blank clears it. */
+app.patch("/api/clients/:id/go-live-date", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const body = await c.req.parseBody();
+	const raw = typeof body.goLiveDate === "string" ? body.goLiveDate.trim() : "";
+	if (raw !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return c.text("Invalid date", 400);
+
+	const [updated, statuses] = await Promise.all([
+		updateClientGoLiveDate(supabase, clientId, raw === "" ? null : raw),
+		listStatuses(supabase),
+	]);
 	if (!updated) return c.text("Client not found", 404);
 	return c.html(renderClientHeader(updated, statuses));
 });

@@ -21,6 +21,12 @@ export function formatMonthlySpend(value: number | null): string {
 	return `$${value.toLocaleString("en-US")} / mo`;
 }
 
+/** A `YYYY-MM-DD` date column (e.g. go-live dates) rendered as "Sep 28, 2026" — parsed as UTC so it never shifts a day in the viewer's timezone. */
+export function formatDateOnly(date: string | null): string {
+	if (!date) return EMPTY;
+	return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 export function truncate(value: string, max: number): string {
 	return value.length > max ? `${value.slice(0, max)}…` : value;
 }

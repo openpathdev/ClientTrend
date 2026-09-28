@@ -2,7 +2,7 @@ import { html, raw } from "hono/html";
 import type { ClientRow, Status } from "../data/types";
 import { renderStatusAvatar } from "./statusAvatar";
 import { renderStatusDropdown } from "./statusDropdown";
-import { displayWebsite, formatInteger, formatPlain, websiteHref } from "./format";
+import { displayWebsite, formatDateOnly, formatInteger, formatPlain, websiteHref } from "./format";
 import { iconPaths } from "../../components/icons/icon-names";
 
 /**
@@ -31,6 +31,34 @@ function renderHubspotSyncIndicator(client: ClientRow) {
 		return html`<span class="text-muted" title="Synced from HubSpot ${lastAttempt}">· synced</span>`;
 	}
 	return "";
+}
+
+/** Manually-entered Go-live Date chip under the CSM chip — click to edit, same inline-form pattern as the Paid Ads go-live chip. Distinct field from `paidAdsGoLiveDate`. */
+function renderGoLiveDate(client: ClientRow) {
+	return html`<div x-data="{ editing: false }" class="rounded-full bg-zebra-row px-3 py-1.5 text-[13px]">
+		<button type="button" x-show="!editing" x-on:click="editing = true" class="flex items-center gap-1.5 text-muted hover:text-ink">
+			<span class="text-[11px] uppercase tracking-[0.04em]">Go-live Date</span>
+			<span class="font-mono text-ink">${formatDateOnly(client.goLiveDate)}</span>
+		</button>
+		<form
+			x-show="editing"
+			x-cloak
+			hx-patch="/api/clients/${client.id}/go-live-date"
+			hx-target="#client-header"
+			hx-swap="outerHTML"
+			class="flex items-center gap-1.5"
+		>
+			<input
+				type="date"
+				name="goLiveDate"
+				value="${client.goLiveDate ?? ""}"
+				aria-label="Go-live date"
+				class="rounded border border-card-border px-1.5 py-0.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
+			/>
+			<button type="submit" class="font-medium text-link hover:underline">Save</button>
+			<button type="button" x-on:click="editing = false" class="font-medium text-muted hover:underline">Cancel</button>
+		</form>
+	</div>`;
 }
 
 export function renderClientHeader(client: ClientRow, statuses: Status[]) {
@@ -95,12 +123,15 @@ export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 				</div>
 			</div>
 
-			<span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-zebra-row px-3 py-1.5 text-[13px] text-ink">
-				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true"
-					>${raw(iconPaths.user)}</svg
-				>
-				${client.csm ? client.csm.name : html`<span class="font-bold text-needs-attention-text">Update CSM in Hubspot</span>`}
-			</span>
+			<div class="flex shrink-0 flex-col items-end gap-2">
+				<span class="inline-flex items-center gap-1.5 rounded-full bg-zebra-row px-3 py-1.5 text-[13px] text-ink">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true"
+						>${raw(iconPaths.user)}</svg
+					>
+					${client.csm ? client.csm.name : html`<span class="font-bold text-needs-attention-text">Update CSM in Hubspot</span>`}
+				</span>
+				${renderGoLiveDate(client)}
+			</div>
 		</div>
 
 		<div class="mt-5 grid grid-cols-2 gap-4 border-t border-row-rule pt-4 sm:grid-cols-4">

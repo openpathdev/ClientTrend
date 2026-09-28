@@ -91,11 +91,29 @@ export function normalizeHubspotText(value: string | null): string | null {
 	return trimmed ? trimmed : null;
 }
 
+/** Whole-number HubSpot number properties (e.g. the hj_*_goal fields) — trims, treats empty/non-numeric as unset, and rounds since the DB columns are integers. */
+export function parseHubspotInteger(value: string | null): number | null {
+	const trimmed = normalizeHubspotText(value);
+	if (trimmed === null) return null;
+	const parsed = Number(trimmed);
+	return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
 export type HubspotCompanyResult =
 	| { status: "ok"; properties: Record<string, string | null> }
 	| { status: "not_found" };
 
-const COMPANY_SYNC_PROPERTIES = ["name", "domain", "service_area_population", "domain_authority", "csm", "hs_state_code", "legal_status"];
+const COMPANY_SYNC_PROPERTIES = [
+	"name",
+	"domain",
+	"service_area_population",
+	"domain_authority",
+	"csm",
+	"hs_state_code",
+	"legal_status",
+	"hj_new_client_goal",
+	"hj_amad_goal",
+];
 
 /** Fetches the simple, directly-mapped Company properties (PRD §14) — never `her_journey_org_data`, see scripts/sync_org_data.py for why that's handled separately. Website product eligibility is NOT among these — see `fetchSubscriptionEligibility` below for why. */
 export async function fetchCompanySyncProperties(env: CloudflareBindings, hubspotCompanyId: string): Promise<HubspotCompanyResult> {

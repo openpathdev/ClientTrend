@@ -8,6 +8,7 @@ const CLIENT_SELECT = `
 	hubspot_company_id, hubspot_sync_status, hubspot_synced_at,
 	general_notes, general_notes_updated_at, general_notes_updated_by,
 	ad_spend_per_month, paid_ads_go_live_date, go_live_date,
+	baseline_clients, baseline_amad, hubspot_new_client_goal, hubspot_amad_goal,
 	integration_hs, integration_iw, integration_acuity, integration_ekyros,
 	csm:csms ( id, name, email, active ),
 	status:statuses!inner ( id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active )
@@ -38,6 +39,10 @@ type ClientQueryRow = {
 	ad_spend_per_month: number | null;
 	paid_ads_go_live_date: string | null;
 	go_live_date: string | null;
+	baseline_clients: number | null;
+	baseline_amad: number | null;
+	hubspot_new_client_goal: number | null;
+	hubspot_amad_goal: number | null;
 	integration_hs: boolean;
 	integration_iw: boolean;
 	integration_acuity: boolean;
@@ -76,6 +81,10 @@ function mapClient(row: ClientQueryRow): ClientRow {
 		adSpendPerMonth: row.ad_spend_per_month,
 		paidAdsGoLiveDate: row.paid_ads_go_live_date,
 		goLiveDate: row.go_live_date,
+		baselineClients: row.baseline_clients,
+		baselineAmad: row.baseline_amad,
+		newClientGoal: row.hubspot_new_client_goal,
+		amadGoal: row.hubspot_amad_goal,
 		integrationFlags: {
 			hs: row.integration_hs,
 			iw: row.integration_iw,
@@ -174,6 +183,20 @@ export async function updateClientGoLiveDate(
 	return getClientById(supabase, clientId);
 }
 
+/** Manually-entered Clients / AM/AD baselines shown in the client header next to their HubSpot-owned goals. Both saved together; null clears. */
+export async function updateClientBaselines(
+	supabase: SupabaseClient,
+	clientId: string,
+	input: { baselineClients: number | null; baselineAmad: number | null },
+): Promise<ClientRow | null> {
+	const { error } = await supabase
+		.from("clients")
+		.update({ baseline_clients: input.baselineClients, baseline_amad: input.baselineAmad })
+		.eq("id", clientId);
+	if (error) throw new Error(error.message);
+	return getClientById(supabase, clientId);
+}
+
 /** Toggles one "which external systems is this center on" checkbox on the Overview card (PRD §5/§8) — manual, independent of any other field. */
 export async function updateClientIntegrationFlag(
 	supabase: SupabaseClient,
@@ -238,6 +261,8 @@ export async function applyHubspotSync(
 		csmId?: string;
 		purchasedProWebsite: boolean;
 		purchasedBaseWebsite: boolean;
+		newClientGoal: number | null;
+		amadGoal: number | null;
 	},
 ): Promise<void> {
 	const update: Record<string, unknown> = {
@@ -249,6 +274,8 @@ export async function applyHubspotSync(
 		legal_status: input.legalStatus,
 		hubspot_purchased_pro_website: input.purchasedProWebsite,
 		hubspot_purchased_base_website: input.purchasedBaseWebsite,
+		hubspot_new_client_goal: input.newClientGoal,
+		hubspot_amad_goal: input.amadGoal,
 		hubspot_sync_status: "synced",
 		hubspot_synced_at: new Date().toISOString(),
 	};
@@ -280,6 +307,8 @@ export async function createClientFromHubspot(
 		defaultStatusId: string;
 		purchasedProWebsite: boolean;
 		purchasedBaseWebsite: boolean;
+		newClientGoal: number | null;
+		amadGoal: number | null;
 	},
 ): Promise<ClientRow> {
 	const { data, error } = await supabase
@@ -296,6 +325,8 @@ export async function createClientFromHubspot(
 			status_id: input.defaultStatusId,
 			hubspot_purchased_pro_website: input.purchasedProWebsite,
 			hubspot_purchased_base_website: input.purchasedBaseWebsite,
+			hubspot_new_client_goal: input.newClientGoal,
+			hubspot_amad_goal: input.amadGoal,
 			hubspot_sync_status: "synced",
 			hubspot_synced_at: new Date().toISOString(),
 		})

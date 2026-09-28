@@ -10,8 +10,9 @@ import { iconPaths } from "../../components/icons/icon-names";
  * reference: status name inline next to the website (not just the icon),
  * CSM as a top-right chip, four stats below (Ad Spend/mo joins once Phase
  * 5 Paid Ads data exists — PRD §11). Name/Website/Population/Domain
- * Authority/CSM are HubSpot-owned (read-only, PRD §14/§15); Status remains
- * the one editable control, reusing the same avatar+dropdown as the
+ * Authority/CSM and the Clients / AM/AD goals are HubSpot-owned (read-only,
+ * PRD §14/§15). Editable: Go-live Date and the Clients / AM/AD baselines
+ * (manual fields), plus Status, reusing the same avatar+dropdown as the
  * Overview card (PRD §19), just re-targeted at this header via
  * `view: "header"` instead of `view: "card"`.
  */
@@ -58,6 +59,53 @@ function renderGoLiveDate(client: ClientRow) {
 			<button type="submit" class="font-medium text-link hover:underline">Save</button>
 			<button type="button" x-on:click="editing = false" class="font-medium text-muted hover:underline">Cancel</button>
 		</form>
+	</div>`;
+}
+
+/**
+ * One "Baseline → Goal" cell in the header's second stats row. Baseline is
+ * manual and click-to-edit; Goal is HubSpot-owned and read-only. Both
+ * baselines save through the same endpoint, so the form carries the other
+ * baseline's current value in a hidden input to avoid clobbering it.
+ */
+function renderBaselineGoal(
+	client: ClientRow,
+	opts: { label: string; field: string; baseline: number | null; goal: number | null; otherField: string; otherValue: number | null },
+) {
+	return html`<div>
+		<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">${opts.label}</div>
+		<div class="mt-1 flex items-center gap-2 font-mono text-[14px]" x-data="{ editing: false }">
+			<button type="button" x-show="!editing" x-on:click="editing = true" class="flex items-center gap-1.5 text-muted hover:text-ink">
+				<span class="font-sans text-[11px] uppercase tracking-[0.04em]">Baseline</span>
+				<span class="text-ink">${formatInteger(opts.baseline)}</span>
+			</button>
+			<form
+				x-show="editing"
+				x-cloak
+				hx-patch="/api/clients/${client.id}/baselines"
+				hx-target="#client-header"
+				hx-swap="outerHTML"
+				class="flex items-center gap-1.5 text-[12px]"
+			>
+				<input type="hidden" name="${opts.otherField}" value="${opts.otherValue ?? ""}" />
+				<input
+					type="number"
+					min="0"
+					step="1"
+					name="${opts.field}"
+					value="${opts.baseline ?? ""}"
+					aria-label="${opts.label} baseline"
+					class="w-20 rounded border border-card-border px-1.5 py-0.5 text-right focus:outline-none focus:ring-2 focus:ring-selected-filter"
+				/>
+				<button type="submit" class="font-sans font-medium text-link hover:underline">Save</button>
+				<button type="button" x-on:click="editing = false" class="font-sans font-medium text-muted hover:underline">Cancel</button>
+			</form>
+			<span class="text-muted" aria-hidden="true">→</span>
+			<span class="flex items-center gap-1.5" title="From HubSpot">
+				<span class="font-sans text-[11px] uppercase tracking-[0.04em] text-muted">Goal</span>
+				<span class="text-ink">${formatInteger(opts.goal)}</span>
+			</span>
+		</div>
 	</div>`;
 }
 
@@ -151,6 +199,25 @@ export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 				<div class="font-sans text-[10.5px] uppercase tracking-[0.08em] text-label">Legal Status</div>
 				<div class="mt-1 font-mono text-[14px] text-ink">${formatPlain(client.legalStatus)}</div>
 			</div>
+		</div>
+
+		<div class="mt-4 grid grid-cols-1 gap-4 border-t border-row-rule pt-4 sm:grid-cols-2">
+			${renderBaselineGoal(client, {
+				label: "Clients",
+				field: "baselineClients",
+				baseline: client.baselineClients,
+				goal: client.newClientGoal,
+				otherField: "baselineAmad",
+				otherValue: client.baselineAmad,
+			})}
+			${renderBaselineGoal(client, {
+				label: "AM/AD",
+				field: "baselineAmad",
+				baseline: client.baselineAmad,
+				goal: client.amadGoal,
+				otherField: "baselineClients",
+				otherValue: client.baselineClients,
+			})}
 		</div>
 	</div>`;
 }

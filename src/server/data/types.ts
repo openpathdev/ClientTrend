@@ -55,6 +55,10 @@ export type ClientRow = {
 	adSpendPerMonth: number | null;
 	paidAdsGoLiveDate: string | null;
 	goLiveDate: string | null;
+	baselineClients: number | null;
+	baselineAmad: number | null;
+	newClientGoal: number | null;
+	amadGoal: number | null;
 	integrationFlags: Record<IntegrationFlag, boolean>;
 };
 

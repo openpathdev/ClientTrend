@@ -1,6 +1,6 @@
 import type { CloudflareBindings } from "./bindings";
 import { createSupabaseClient } from "./supabase";
-import { fetchAllOwners, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, HubspotRateLimitError } from "./hubspot";
+import { fetchAllOwners, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger, HubspotRateLimitError } from "./hubspot";
 import { upsertCsmFromOwner, listCsmsWithOwnerId, listCsms, canonicalOwnerId } from "./data/csms";
 import { listStatuses } from "./data/statuses";
 import { listHubspotLinkedClients, applyHubspotSync, markHubspotSyncStatus, createClientFromHubspot } from "./data/clients";
@@ -116,6 +116,8 @@ export async function runHubspotSync(
 						csmId,
 						purchasedProWebsite: eligibility.purchasedProWebsite,
 						purchasedBaseWebsite: eligibility.purchasedBaseWebsite,
+						newClientGoal: parseHubspotInteger(props.hj_new_client_goal),
+						amadGoal: parseHubspotInteger(props.hj_amad_goal),
 					});
 					await logSyncResult(supabase, runId, client.id, "synced");
 					clientsProcessed++;
@@ -216,6 +218,8 @@ export async function tryAutoImportCompany(env: CloudflareBindings, hubspotCompa
 		defaultStatusId: statuses[0].id,
 		purchasedProWebsite,
 		purchasedBaseWebsite,
+		newClientGoal: parseHubspotInteger(props.hj_new_client_goal),
+		amadGoal: parseHubspotInteger(props.hj_amad_goal),
 	});
 	return { status: "imported", clientId: client.id };
 }

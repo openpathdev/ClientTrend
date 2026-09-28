@@ -11,6 +11,7 @@ import {
 	updateGeneralNotes,
 	updatePaidAdsSettings,
 	updateClientGoLiveDate,
+	updateClientBaselines,
 	updateClientIntegrationFlag,
 	getClientById,
 } from "./data/clients";
@@ -23,7 +24,7 @@ import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus 
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, tryAutoImportCompany } from "./syncHubspot";
 import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
-import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText } from "./hubspot";
+import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger } from "./hubspot";
 import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
 import { listCsmsWithOwnerId } from "./data/csms";
 import { renderHubspotResults, renderImportedRow } from "./render/hubspotImportPanel";
@@ -152,6 +153,29 @@ app.patch("/api/clients/:id/go-live-date", async (c) => {
 
 	const [updated, statuses] = await Promise.all([
 		updateClientGoLiveDate(supabase, clientId, raw === "" ? null : raw),
+		listStatuses(supabase),
+	]);
+	if (!updated) return c.text("Client not found", 404);
+	return c.html(renderClientHeader(updated, statuses));
+});
+
+/** Manually-entered Clients / AM/AD baselines in the client header. Each field's form carries the other's current value, so both are always submitted; blank clears. */
+app.patch("/api/clients/:id/baselines", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const body = await c.req.parseBody();
+
+	const parseBaseline = (value: unknown): number | null | undefined => {
+		const raw = typeof value === "string" ? value.trim() : "";
+		if (raw === "") return null;
+		return /^\d+$/.test(raw) ? Number(raw) : undefined;
+	};
+	const baselineClients = parseBaseline(body.baselineClients);
+	const baselineAmad = parseBaseline(body.baselineAmad);
+	if (baselineClients === undefined || baselineAmad === undefined) return c.text("Baselines must be whole numbers", 400);
+
+	const [updated, statuses] = await Promise.all([
+		updateClientBaselines(supabase, clientId, { baselineClients, baselineAmad }),
 		listStatuses(supabase),
 	]);
 	if (!updated) return c.text("Client not found", 404);
@@ -714,6 +738,8 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
 		defaultStatusId,
 		purchasedProWebsite: eligibility.purchasedProWebsite,
 		purchasedBaseWebsite: eligibility.purchasedBaseWebsite,
+		newClientGoal: parseHubspotInteger(company.properties.hj_new_client_goal),
+		amadGoal: parseHubspotInteger(company.properties.hj_amad_goal),
 	});
 
 	return c.html(renderImportedRow(hubspotCompanyId, client.id));

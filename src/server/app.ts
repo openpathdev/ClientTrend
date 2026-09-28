@@ -784,7 +784,10 @@ app.post("/api/admin/hubspot-sync/run", async (c) => {
  * isn't blocked on the full multi-batch sync, which can take a minute-plus.
  */
 app.post("/api/admin/hubspot-sync/trigger", async (c) => {
-	const runUrl = new URL("/api/admin/hubspot-sync/run", c.req.url);
+	// Not `c.req.url`: users browse via the Access-protected custom domain, and
+	// Access redirects this server-to-server call to its login page, so /run was
+	// never reached. workers.dev isn't behind Access (the shared secret guards /run).
+	const runUrl = new URL("/api/admin/hubspot-sync/run", c.env.HUBSPOT_SYNC_BASE_URL);
 	c.executionCtx.waitUntil(
 		fetch(runUrl.toString(), {
 			method: "POST",

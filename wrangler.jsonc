@@ -16,7 +16,12 @@
 	// `.dev.vars` locally and `wrangler secret put` in each deployed
 	// environment — never committed here.
 	"vars": {
-		"PUBLIC_APP_ENV": "development"
+		"PUBLIC_APP_ENV": "development",
+		// Origin the manual "Sync HubSpot" button hands the sync off to. Must NOT be
+		// the Access-protected custom domain (clienttrends.828collective.com) —
+		// Access answers a Worker's self-fetch there with a login redirect, so
+		// the sync never starts. Same URL the GitHub Actions cron calls.
+		"HUBSPOT_SYNC_BASE_URL": "https://client-trends.analytics-1cd.workers.dev"
 	}
 	// Phase 6 will add a `triggers.crons` entry here once the HubSpot
 	// scheduled sync handler exists (PRD §14, §39).

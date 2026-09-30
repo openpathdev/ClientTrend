@@ -38,6 +38,19 @@ npx supabase db push
 (Creating the actual Supabase project is a manual step in the Supabase
 dashboard/CLI — not something run from this repo.)
 
+## Performance metrics sync
+
+The HubSpot-sourced Performance metrics are computed from each company's
+`her_journey_org_data` file by `scripts/sync_org_data.py`, not by the Worker.
+It runs daily for every client via `.github/workflows/org-data-sync.yml`
+(trailing 3 months), which needs the `HUBSPOT_API_TOKEN`, `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` repository secrets. To run it by hand:
+
+```sh
+python3 scripts/sync_org_data.py --all              # every client, 12 months
+python3 scripts/sync_org_data.py --client-id <uuid> --dry-run
+```
+
 ## Commands
 
 | Command                | Action                                              |

@@ -10,7 +10,7 @@ into the tens of megabytes per client (21.9MB for the test company used to
 build this script) and contains raw session-level event data, not ready-made
 monthly numbers. Parsing that repeatedly, per client, inside a Workers
 scheduled handler risks CPU/memory limits. This script does that heavy
-lifting offline (run manually or via your own cron elsewhere) and writes
+lifting offline (daily via GitHub Actions, or by hand) and writes
 the *results* — 9 numbers per client per month — into Supabase; the Worker
 itself never touches the raw file.
 
@@ -58,8 +58,15 @@ is unaffected by this — it's a separate, already-established metric and
 still deliberately uses `submitted` (distinct clients who actually
 completed a submission), not `isFormSession`.
 
+Months are bucketed in each center's local time zone (from its state), not
+UTC — see STATE_TIMEZONES.
+
+Runs daily for every client via .github/workflows/org-data-sync.yml
+(`--all --months 3`); can also be run by hand.
+
 Usage:
     python3 scripts/sync_org_data.py --client-id <supabase-client-uuid> [--months 12] [--dry-run]
+    python3 scripts/sync_org_data.py --all [--months 12] [--dry-run]
 
 Requires HUBSPOT_API_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — read
 from .dev.vars in the repo root (same file the Worker uses locally), or
@@ -72,6 +79,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -170,20 +178,67 @@ def supabase_upsert(table: str, rows: list[dict], on_conflict: str) -> None:
 
 # ── HubSpot: resolve the company's her_journey_org_data file, download it ───
 
-def fetch_org_data(hubspot_company_id: str) -> dict:
+class NoOrgDataFile(Exception):
+	"""Company has no her_journey_org_data file yet — a skip, not a failure (e.g. a center not yet on Her Journey)."""
+
+
+def fetch_org_data(hubspot_company_id: str) -> tuple[dict, str | None]:
+	"""Returns (parsed file, the company's HubSpot `timezone` property) — the
+	latter is only a fallback for clients with no state_code, see
+	`client_timezone`."""
 	company = hubspot_get(
-		f"/crm/v3/objects/companies/{hubspot_company_id}?properties=her_journey_org_data"
+		f"/crm/v3/objects/companies/{hubspot_company_id}?properties=her_journey_org_data,timezone"
 	)
+	hubspot_timezone = company.get("properties", {}).get("timezone") or None
 	file_id = company.get("properties", {}).get("her_journey_org_data")
 	if not file_id:
-		raise RuntimeError(f"Company {hubspot_company_id} has no her_journey_org_data file set")
+		raise NoOrgDataFile(f"Company {hubspot_company_id} has no her_journey_org_data file set")
 
 	signed = hubspot_get(f"/files/v3/files/{file_id}/signed-url")
 	download_url = signed["url"]
 
 	print(f"Downloading her_journey_org_data ({signed.get('size', '?')} bytes)...", file=sys.stderr)
 	body = _request(download_url, headers={})
-	return json.loads(body)
+	return json.loads(body), hubspot_timezone
+
+
+# ── Center-local month boundaries ───────────────────────────────────────────
+# Sessions are bucketed into months by the *center's* local time, not UTC
+# (2026-09-30 decision) — otherwise sessions a few hours either side of
+# midnight on the 1st land in the wrong month, off by one or two from what
+# the center (and the other app reading this same file) sees. Keyed off
+# clients.state_code rather than HubSpot's company `timezone` property,
+# which is unset on about a third of companies and wrong on some (a CA
+# center set to Chicago, an OH center set to Winnipeg). States that span
+# two zones use the zone most of the state's population is in.
+STATE_TIMEZONES = {
+	"AL": "America/Chicago", "AK": "America/Anchorage", "AZ": "America/Phoenix", "AR": "America/Chicago",
+	"CA": "America/Los_Angeles", "CO": "America/Denver", "CT": "America/New_York", "DE": "America/New_York",
+	"DC": "America/New_York", "FL": "America/New_York", "GA": "America/New_York", "HI": "Pacific/Honolulu",
+	"ID": "America/Boise", "IL": "America/Chicago", "IN": "America/Indiana/Indianapolis", "IA": "America/Chicago",
+	"KS": "America/Chicago", "KY": "America/New_York", "LA": "America/Chicago", "ME": "America/New_York",
+	"MD": "America/New_York", "MA": "America/New_York", "MI": "America/Detroit", "MN": "America/Chicago",
+	"MS": "America/Chicago", "MO": "America/Chicago", "MT": "America/Denver", "NE": "America/Chicago",
+	"NV": "America/Los_Angeles", "NH": "America/New_York", "NJ": "America/New_York", "NM": "America/Denver",
+	"NY": "America/New_York", "NC": "America/New_York", "ND": "America/Chicago", "OH": "America/New_York",
+	"OK": "America/Chicago", "OR": "America/Los_Angeles", "PA": "America/New_York", "RI": "America/New_York",
+	"SC": "America/New_York", "SD": "America/Chicago", "TN": "America/Chicago", "TX": "America/Chicago",
+	"UT": "America/Denver", "VT": "America/New_York", "VA": "America/New_York", "WA": "America/Los_Angeles",
+	"WV": "America/New_York", "WI": "America/Chicago", "WY": "America/Denver", "PR": "America/Puerto_Rico",
+}
+
+
+def client_timezone(state_code: str | None, hubspot_timezone: str | None) -> str:
+	"""state_code → zone; HubSpot's `timezone` only when there's no state; UTC last."""
+	if state_code and state_code.strip().upper() in STATE_TIMEZONES:
+		return STATE_TIMEZONES[state_code.strip().upper()]
+	if hubspot_timezone:
+		try:
+			ZoneInfo(hubspot_timezone)
+			return hubspot_timezone
+		except Exception:
+			pass
+	return "UTC"
 
 
 # ── Metric computation — ported from ProcessData/processors/{compute_metrics,aggregate_stats}.py ──
@@ -230,17 +285,20 @@ def _distinct_client_ids(sessions: list) -> set:
 	return ids
 
 
-def _month_bounds(month: str):
+def _month_bounds(month: str, tz: str = "UTC"):
 	"""`month` is first-of-month YYYY-MM-01 (matches src/server/months.ts). Returns
-	[start, end) as tz-aware UTC datetimes covering the whole calendar month."""
+	[start, end) as tz-aware datetimes covering the whole calendar month in
+	`tz` (the center's local zone). Session timestamps parse as UTC-aware, so
+	comparing across zones is exact."""
+	zone = ZoneInfo(tz)
 	year, mon, _ = (int(p) for p in month.split("-"))
-	start = datetime(year, mon, 1, tzinfo=timezone.utc)
-	end = datetime(year + 1, 1, 1, tzinfo=timezone.utc) if mon == 12 else datetime(year, mon + 1, 1, tzinfo=timezone.utc)
+	start = datetime(year, mon, 1, tzinfo=zone)
+	end = datetime(year + 1, 1, 1, tzinfo=zone) if mon == 12 else datetime(year, mon + 1, 1, tzinfo=zone)
 	return start, end
 
 
-def compute_month_metrics(sessions: list, month: str) -> dict:
-	start, end = _month_bounds(month)
+def compute_month_metrics(sessions: list, month: str, tz: str = "UTC") -> dict:
+	start, end = _month_bounds(month, tz)
 
 	def in_month(s):
 		ts = _parse_ts(s.get("timestamp"))
@@ -308,37 +366,15 @@ def trailing_months(count: int) -> list[str]:
 	return months
 
 
-def main():
-	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-	parser.add_argument("--client-id", required=True, help="Supabase clients.id (uuid)")
-	parser.add_argument("--months", type=int, default=12, help="Trailing month window (default 12, matches the app's display window)")
-	parser.add_argument("--dry-run", action="store_true", help="Compute and print without writing to Supabase")
-	args = parser.parse_args()
-
-	client_rows = supabase_get(f"clients?id=eq.{args.client_id}&select=id,name,hubspot_company_id")
-	if not client_rows:
-		print(f"Error: no client with id {args.client_id}", file=sys.stderr)
-		sys.exit(1)
-	client = client_rows[0]
+def sync_client(client: dict, metric_id_by_key: dict, month_count: int, dry_run: bool) -> None:
 	hubspot_company_id = client.get("hubspot_company_id")
 	if not hubspot_company_id:
-		print(f"Error: client {client['name']} has no hubspot_company_id set", file=sys.stderr)
-		sys.exit(1)
+		raise RuntimeError(f"client {client['name']} has no hubspot_company_id set")
 
-	# Not filtered to source=eq.hubspot — also need form_fills' id, a manual
-	# metric this script opportunistically fills in when it can (see module
-	# docstring). Small catalog table either way, cheap to fetch in full.
-	metrics_catalog = supabase_get("monthly_metrics?select=id,key")
-	metric_id_by_key = {m["key"]: m["id"] for m in metrics_catalog}
-
-	missing_keys = set(compute_month_metrics([], trailing_months(1)[0]).keys()) - set(metric_id_by_key.keys())
-	if missing_keys:
-		print(f"Error: monthly_metrics catalog is missing keys: {sorted(missing_keys)}", file=sys.stderr)
-		sys.exit(1)
-
-	org_data = fetch_org_data(hubspot_company_id)
+	org_data, hubspot_timezone = fetch_org_data(hubspot_company_id)
 	sessions = org_data.get("sessions", [])
-	print(f"Loaded {len(sessions)} sessions for {client['name']} ({hubspot_company_id})", file=sys.stderr)
+	tz = client_timezone(client.get("state_code"), hubspot_timezone)
+	print(f"Loaded {len(sessions)} sessions for {client['name']} ({hubspot_company_id}), months bucketed in {tz}", file=sys.stderr)
 
 	# Whole-file check, not per-month (2026-09-16 decision) — a center that
 	# genuinely uses HubSpot's own form tracking can still have a real
@@ -351,16 +387,15 @@ def main():
 		file=sys.stderr,
 	)
 
-	months = trailing_months(args.months)
 	rows = []
-	for month in months:
-		values = compute_month_metrics(sessions, month)
+	for month in trailing_months(month_count):
+		values = compute_month_metrics(sessions, month, tz)
 		if not has_form_submissions:
 			del values["form_fills"]
 		print(f"  {month}: {values}", file=sys.stderr)
 		for key, value in values.items():
 			rows.append({
-				"client_id": args.client_id,
+				"client_id": client["id"],
 				"metric_id": metric_id_by_key[key],
 				"month": month,
 				"value": value,
@@ -368,12 +403,65 @@ def main():
 				"updated_by": "hubspot-sync",
 			})
 
-	if args.dry_run:
-		print(f"\nDry run — would upsert {len(rows)} monthly_data_values rows.", file=sys.stderr)
+	if dry_run:
+		print(f"  Dry run — would upsert {len(rows)} monthly_data_values rows.", file=sys.stderr)
 		return
 
 	supabase_upsert("monthly_data_values", rows, on_conflict="client_id,metric_id,month")
-	print(f"\nUpserted {len(rows)} monthly_data_values rows for {client['name']}.", file=sys.stderr)
+	print(f"  Upserted {len(rows)} monthly_data_values rows for {client['name']}.", file=sys.stderr)
+
+
+def main():
+	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+	target = parser.add_mutually_exclusive_group(required=True)
+	target.add_argument("--client-id", help="Supabase clients.id (uuid)")
+	target.add_argument("--all", action="store_true", help="Every HubSpot-linked client (what the daily GitHub Action runs)")
+	parser.add_argument("--months", type=int, default=12, help="Trailing month window (default 12, matches the app's display window)")
+	parser.add_argument("--dry-run", action="store_true", help="Compute and print without writing to Supabase")
+	args = parser.parse_args()
+
+	select = "id,name,hubspot_company_id,state_code"
+	if args.all:
+		clients = supabase_get(f"clients?hubspot_company_id=not.is.null&select={select}&order=name")
+	else:
+		clients = supabase_get(f"clients?id=eq.{args.client_id}&select={select}")
+		if not clients:
+			print(f"Error: no client with id {args.client_id}", file=sys.stderr)
+			sys.exit(1)
+
+	# Not filtered to source=eq.hubspot — also need form_fills' id, a manual
+	# metric this script opportunistically fills in when it can (see module
+	# docstring). Small catalog table either way, cheap to fetch in full.
+	metrics_catalog = supabase_get("monthly_metrics?select=id,key")
+	metric_id_by_key = {m["key"]: m["id"] for m in metrics_catalog}
+
+	missing_keys = set(compute_month_metrics([], trailing_months(1)[0]).keys()) - set(metric_id_by_key.keys())
+	if missing_keys:
+		print(f"Error: monthly_metrics catalog is missing keys: {sorted(missing_keys)}", file=sys.stderr)
+		sys.exit(1)
+
+	# One client's failure (e.g. no her_journey_org_data file yet) must not
+	# stop the rest of an --all run; still exit non-zero so the scheduled
+	# GitHub Action shows as failed and someone notices.
+	failures = []
+	skipped = []
+	for client in clients:
+		try:
+			sync_client(client, metric_id_by_key, args.months, args.dry_run)
+		except NoOrgDataFile as err:
+			print(f"  SKIPPED {client['name']}: {err}", file=sys.stderr)
+			skipped.append(client["name"])
+		except Exception as err:  # noqa: BLE001
+			print(f"  FAILED {client['name']}: {err}", file=sys.stderr)
+			failures.append(client["name"])
+
+	synced = len(clients) - len(failures) - len(skipped)
+	print(f"\nDone: {synced} of {len(clients)} clients synced.", file=sys.stderr)
+	if skipped:
+		print(f"Skipped (no her_journey_org_data file): {', '.join(skipped)}", file=sys.stderr)
+	if failures:
+		print(f"Failed: {', '.join(failures)}", file=sys.stderr)
+		sys.exit(1)
 
 
 if __name__ == "__main__":

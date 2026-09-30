@@ -43,8 +43,9 @@ dashboard/CLI — not something run from this repo.)
 The HubSpot-sourced Performance metrics are computed from each company's
 `her_journey_org_data` file by `scripts/sync_org_data.py`, not by the Worker.
 It runs daily for every client via `.github/workflows/org-data-sync.yml`
-(trailing 3 months), which needs the `HUBSPOT_API_TOKEN`, `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` repository secrets. To run it by hand:
+(trailing 3 months), which needs the `HUBSPOT_API_TOKEN` and
+`SUPABASE_SERVICE_ROLE_KEY` repository secrets, plus `SUPABASE_URL` as either
+a repository variable or a secret. To run it by hand:
 
 ```sh
 python3 scripts/sync_org_data.py --all              # every client, 12 months

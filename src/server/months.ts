@@ -22,7 +22,9 @@ export function trailingMonths(count: number, endingBefore?: string): string[] {
 	return months;
 }
 
+/** Table column header, e.g. "SEP '26" — the 2-digit year disambiguates the same month across a year boundary in the trailing window. */
 export function monthLabel(month: string): string {
 	const d = new Date(`${month}T00:00:00Z`);
-	return d.toLocaleDateString(undefined, { month: "short", timeZone: "UTC" }).toUpperCase();
+	const name = d.toLocaleDateString(undefined, { month: "short", timeZone: "UTC" }).toUpperCase();
+	return `${name} '${month.slice(2, 4)}`;
 }

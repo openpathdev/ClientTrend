@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Populates the 9 HubSpot-sourced Monthly Data metrics (PRD §14) for one
+Populates the 8 HubSpot-sourced Monthly Data metrics (PRD §14) for one
 client, from that client's `her_journey_org_data` HubSpot file property.
 
 Why this is a separate script, not part of the Cloudflare Worker sync job:
@@ -26,9 +26,8 @@ than one candidate existed were confirmed with the client (2026-08-28/29):
   - Unique Clients   = distinct client identity, deduped across sessions
   - Widget Click %   = widget sessions ÷ total sessions (no source field;
     this is our own formula, confirmed acceptable)
-  - Hubspot Submission Clients = distinct client identity among sessions
-    with submitted=True — PROVISIONAL, not one of the original 8 metrics,
-    proposed by us and not yet explicitly confirmed.
+  (A 9th, "Hubspot Submission Clients", was dropped 2026-09-30 — replaced
+  in the grid by a manually-entered "ABV" row.)
 
 Also opportunistically fills the existing "Form Fills" manual metric
 (catalog key `form_fills`) — 2026-09-16 user decision — but ONLY for centers
@@ -53,10 +52,7 @@ form widget), NOT `submitted=True` (sessions that actually completed
 submission) — `submitted` was the original, too-strict choice; confirmed
 live that `submitted` is a strict subset of `isFormSession` for the same
 month (10 of 18), i.e. the difference is real incomplete/abandoned form
-starts, not a bucketing or timezone bug. `hubspot_submission_clients` above
-is unaffected by this — it's a separate, already-established metric and
-still deliberately uses `submitted` (distinct clients who actually
-completed a submission), not `isFormSession`.
+starts, not a bucketing or timezone bug.
 
 Months are bucketed in each center's local time zone (from its state), not
 UTC — see STATE_TIMEZONES.
@@ -324,15 +320,12 @@ def compute_month_metrics(sessions: list, month: str, tz: str = "UTC") -> dict:
 	am_ad = sum(1 for s in month_sessions if s.get("validated") and s.get("clientClassification") in _AM_AD_LABELS)
 	av_am_ad = sum(1 for s in month_sessions if s.get("validated") and s.get("clientClassification") in _AV_AM_AD_LABELS)
 
-	submission_sessions = [s for s in month_sessions if s.get("submitted")]
-	hubspot_submission_clients = len(_distinct_client_ids(submission_sessions))
-
 	# Form *engagement*, not completed submission (2026-09-16 correction) —
 	# a session that opened/started the form widget, whether or not it was
-	# ever actually submitted. Deliberately NOT `submission_sessions` above:
-	# confirmed live (ABC Life Choices, July) that `submitted` underreports
-	# vs. a second app reading the same file, because that app counts every
-	# form-engaged session, including abandoned/incomplete ones.
+	# ever actually submitted (`submitted`). Confirmed live (ABC Life
+	# Choices, July) that `submitted` underreports vs. a second app reading
+	# the same file, because that app counts every form-engaged session,
+	# including abandoned/incomplete ones.
 	form_engaged_sessions = [s for s in month_sessions if s.get("isFormSession")]
 
 	return {
@@ -344,7 +337,6 @@ def compute_month_metrics(sessions: list, month: str, tz: str = "UTC") -> dict:
 		"appointment_pct": appointment_pct,
 		"am_ad": am_ad,
 		"av_am_ad": av_am_ad,
-		"hubspot_submission_clients": hubspot_submission_clients,
 		# Only kept in the final upload if this center shows any HubSpot form
 		# engagement at all; see `has_form_submissions` in main(). Always
 		# computed here since it's free.

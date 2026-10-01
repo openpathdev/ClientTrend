@@ -135,8 +135,13 @@ function renderCellMarker(
 	const eventName = `toggle-cell-popover-${section}-${domKey}`;
 	const endpoint = highlightEndpoint(clientId, section, metric.id, month);
 
+	// The wrapper's own z-index is the ceiling for the popover and the hover
+	// comment preview inside it, so while either is showing it must sit above
+	// the sticky metric-name column (z-10 cells, z-20 header) — otherwise later
+	// rows' sticky cells paint over them.
 	return html`<div
-		class="absolute right-0.5 top-0.5 z-10"
+		class="absolute right-0.5 top-0.5 group-hover:z-40"
+		x-bind:class="open ? 'z-40' : 'z-10'"
 		x-data="{ open: false }"
 		x-on:${eventName}.window="open = !open"
 	>

@@ -55,6 +55,34 @@ function renderGroupHeaderRow(groupLabel: string, monthCount: number) {
 }
 
 /**
+ * Alpine state for one cell's marker (see renderCellMarker): open/closed,
+ * plus viewport coordinates for the fixed-position popover (w-80 = 320px)
+ * and hover preview (w-72 = 288px). Each is placed just below the marker,
+ * right edges aligned, clamped inside the window, and flipped above the
+ * marker when there isn't room below. Heights fall back to an estimate when
+ * the element isn't rendered yet (e.g. the first placement before opening).
+ */
+const CELL_POPOVER_DATA = `{
+	open: false,
+	popoverPos: { top: 0, left: 0 },
+	previewPos: { top: 0, left: 0 },
+	place(width, el, fallbackHeight) {
+		const r = this.$root.getBoundingClientRect();
+		const h = (el && el.offsetHeight) || fallbackHeight;
+		const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+		let top = r.bottom + 4;
+		if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+		return { top, left };
+	},
+	placePopover() { this.popoverPos = this.place(320, this.$refs.popover, 220); },
+	placePreview() { this.previewPos = this.place(288, this.$refs.preview, 120); },
+	toggle() {
+		this.open = !this.open;
+		if (this.open) { this.placePopover(); this.$nextTick(() => this.placePopover()); }
+	},
+}`;
+
+/**
  * The badge/trigger button plus its hover-preview tooltip, wrapped in one
  * `display:contents` element (not inlined) because comment mutations
  * re-render this whole unit out-of-band via `hx-swap-oob`, so both the
@@ -86,7 +114,9 @@ export function renderCellMarkerButton(
 		${
 			hasComments
 				? html`<div
-						class="pointer-events-none absolute right-0 top-full z-20 mt-1 hidden w-72 rounded-md border border-card-border bg-surface p-2 text-left text-[11.5px] normal-case tracking-normal text-ink shadow-lg group-hover:block"
+						x-ref="preview"
+						x-bind:style="'top:' + previewPos.top + 'px;left:' + previewPos.left + 'px'"
+						class="pointer-events-none fixed z-20 hidden w-72 rounded-md border border-card-border bg-surface p-2 text-left text-[11.5px] normal-case tracking-normal text-ink shadow-lg group-hover:block"
 					>
 						${cellComments
 							.slice(0, 3)
@@ -135,15 +165,21 @@ function renderCellMarker(
 	const eventName = `toggle-cell-popover-${section}-${domKey}`;
 	const endpoint = highlightEndpoint(clientId, section, metric.id, month);
 
-	// The wrapper's own z-index is the ceiling for the popover and the hover
-	// comment preview inside it, so while either is showing it must sit above
-	// the sticky metric-name column (z-10 cells, z-20 header) — otherwise later
-	// rows' sticky cells paint over them.
+	// The popover and hover preview are `position: fixed`, placed from this
+	// marker's on-screen rect by CELL_POPOVER_DATA, because the table's
+	// overflow-x-auto wrapper clips anything absolutely positioned that sticks
+	// out of it (first month column, next to the sticky metric names). Fixed
+	// escapes that clipping but not stacking contexts, so the wrapper's own
+	// z-index is still their ceiling: while either is showing it rises above
+	// the sticky metric-name column (z-10 cells, z-20 header).
 	return html`<div
 		class="absolute right-0.5 top-0.5 group-hover:z-40"
 		x-bind:class="open ? 'z-40' : 'z-10'"
-		x-data="{ open: false }"
-		x-on:${eventName}.window="open = !open"
+		x-data="${CELL_POPOVER_DATA}"
+		x-init="$root.closest('td').addEventListener('mouseenter', () => placePreview())"
+		x-on:${eventName}.window="toggle()"
+		x-on:resize.window="open && placePopover()"
+		x-on:scroll.window.capture="open && placePopover()"
 	>
 		${renderCellMarkerButton(clientId, section, metric, month, cellComments, false)}
 		<div
@@ -151,7 +187,9 @@ function renderCellMarker(
 			x-cloak
 			x-transition
 			x-on:click.outside="open = false"
-			class="absolute right-0 top-full z-30 mt-1 w-80 rounded-lg border border-card-border bg-surface p-3 text-left normal-case tracking-normal shadow-lg"
+			x-ref="popover"
+			x-bind:style="'top:' + popoverPos.top + 'px;left:' + popoverPos.left + 'px'"
+			class="fixed z-30 w-80 rounded-lg border border-card-border bg-surface p-3 text-left normal-case tracking-normal shadow-lg"
 		>
 			<div class="flex items-center gap-1.5 border-b border-row-rule pb-2">
 				<span class="mr-0.5 text-[11px] text-muted">Highlight:</span>

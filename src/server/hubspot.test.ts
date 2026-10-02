@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeHubspotText, parseHubspotInteger } from "./hubspot";
+import { normalizeHubspotText, parseHubspotInteger, resolveStateCode } from "./hubspot";
 
 describe("normalizeHubspotText", () => {
 	it("passes through a clean value unchanged", () => {
@@ -46,5 +46,30 @@ describe("parseHubspotInteger", () => {
 
 	it("accepts HubSpot's decimal form of a whole number", () => {
 		expect(parseHubspotInteger("12.0")).toBe(12);
+	});
+});
+
+describe("resolveStateCode", () => {
+	it("prefers the human-entered state over an enrichment-filled code that disagrees", () => {
+		expect(resolveStateCode("TX", "NC")).toBe("TX");
+	});
+
+	it("converts a full state name to its code", () => {
+		expect(resolveStateCode("South Carolina", "SC")).toBe("SC");
+		expect(resolveStateCode("new mexico", null)).toBe("NM");
+	});
+
+	it("trims stray whitespace and accepts lowercase codes", () => {
+		expect(resolveStateCode(" tx\t", null)).toBe("TX");
+	});
+
+	it("falls back to hs_state_code when state is blank or unrecognised", () => {
+		expect(resolveStateCode(null, "KY")).toBe("KY");
+		expect(resolveStateCode("Ontario", "VT")).toBe("VT");
+	});
+
+	it("returns null rather than a value outside the states table", () => {
+		expect(resolveStateCode("Ontario", "ON")).toBe(null);
+		expect(resolveStateCode(null, null)).toBe(null);
 	});
 });

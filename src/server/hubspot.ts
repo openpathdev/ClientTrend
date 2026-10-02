@@ -91,6 +91,40 @@ export function normalizeHubspotText(value: string | null): string | null {
 	return trimmed ? trimmed : null;
 }
 
+/** Same 50 states + DC as the `states` table (supabase/migrations/20260826090300_create_states.sql), which clients.state_code references — so `resolveStateCode` can only ever return a code that insert/update will accept. */
+const US_STATES: Record<string, string> = {
+	AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado",
+	CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia",
+	HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky",
+	LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota",
+	MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire",
+	NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota",
+	OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island",
+	SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+	VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+const STATE_CODE_BY_NAME = new Map(Object.entries(US_STATES).map(([code, name]) => [name.toUpperCase(), code]));
+
+function toStateCode(value: string | null): string | null {
+	const v = normalizeHubspotText(value)?.toUpperCase();
+	if (!v) return null;
+	if (v in US_STATES) return v;
+	return STATE_CODE_BY_NAME.get(v) ?? null;
+}
+
+/**
+ * The client's state, from HubSpot's human-entered `state` ("State/Region",
+ * either "TX" or "Texas" in this account's data) first, falling back to
+ * `hs_state_code` only when `state` is blank or unrecognised.
+ * `hs_state_code` is auto-filled by HubSpot's data enrichment and was wrong
+ * for 3 of 42 companies (2026-10-02: e.g. Hope Pregnancy Center, TX in
+ * `state` but NC in `hs_state_code`), and blank for one that has a `state`.
+ * Returns null rather than any value outside the `states` table.
+ */
+export function resolveStateCode(state: string | null, hsStateCode: string | null): string | null {
+	return toStateCode(state) ?? toStateCode(hsStateCode);
+}
+
 /** Whole-number HubSpot number properties (e.g. the hj_*_goal fields) — trims, treats empty/non-numeric as unset, and rounds since the DB columns are integers. */
 export function parseHubspotInteger(value: string | null): number | null {
 	const trimmed = normalizeHubspotText(value);
@@ -109,6 +143,7 @@ const COMPANY_SYNC_PROPERTIES = [
 	"service_area_population",
 	"domain_authority",
 	"csm",
+	"state",
 	"hs_state_code",
 	"legal_status",
 	"hj_new_client_goal",

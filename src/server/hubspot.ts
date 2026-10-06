@@ -85,6 +85,31 @@ export async function searchEligibleCompanies(env: CloudflareBindings, query: st
 	return body.results;
 }
 
+/** Every company id whose `csm` is one of `ownerIds`, ascending by id — the candidate list for the daily catch-up import (see `runCatchupImport`). Paginates; HubSpot caps search pages at 100. */
+export async function searchCompanyIdsByCsm(env: CloudflareBindings, ownerIds: string[]): Promise<string[]> {
+	if (ownerIds.length === 0) return [];
+	const ids: string[] = [];
+	let after: string | undefined;
+	do {
+		const res = await hubspotFetch(env, "/crm/v3/objects/companies/search", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				filterGroups: [{ filters: [{ propertyName: "csm", operator: "IN", values: ownerIds }] }],
+				sorts: [{ propertyName: "hs_object_id", direction: "ASCENDING" }],
+				properties: ["hs_object_id"],
+				limit: 100,
+				after,
+			}),
+		});
+		if (!res.ok) throw new Error(`Company search by csm failed: HTTP ${res.status}`);
+		const body = (await res.json()) as { results: { id: string }[]; paging?: { next?: { after: string } } };
+		ids.push(...body.results.map((r) => r.id));
+		after = body.paging?.next?.after;
+	} while (after);
+	return ids;
+}
+
 /** `hs_state_code`/`legal_status` have both been seen with stray whitespace (e.g. a trailing tab) in this HubSpot account's real data — trims and treats empty as unset. */
 export function normalizeHubspotText(value: string | null): string | null {
 	const trimmed = value?.trim();

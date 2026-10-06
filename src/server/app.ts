@@ -22,7 +22,7 @@ import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus 
 import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
 import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus } from "./data/paidAdsData";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
-import { runHubspotSync, tryAutoImportCompany } from "./syncHubspot";
+import { runHubspotSync, runCatchupImport, tryAutoImportCompany } from "./syncHubspot";
 import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
 import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger, resolveStateCode } from "./hubspot";
 import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
@@ -758,12 +758,21 @@ app.post("/api/admin/hubspot-sync/run", async (c) => {
 	const cursorParam = c.req.query("cursor");
 	const cursor = cursorParam !== undefined ? Number(cursorParam) : undefined;
 	const runId = c.req.query("runId") ?? undefined;
-	const result = await runHubspotSync(c.env, { cursor, runId });
+	const result =
+		c.req.query("phase") === "catchup" && runId
+			? await runCatchupImport(c.env, runId, c.req.query("after") ?? undefined)
+			: await runHubspotSync(c.env, { cursor, runId });
 
 	if (result.status === "more") {
 		const nextUrl = new URL(c.req.url);
-		nextUrl.searchParams.set("cursor", String(result.nextCursor));
+		nextUrl.search = "";
 		nextUrl.searchParams.set("runId", result.runId);
+		if (result.nextPhase === "catchup") {
+			nextUrl.searchParams.set("phase", "catchup");
+			if (result.nextAfter) nextUrl.searchParams.set("after", result.nextAfter);
+		} else {
+			nextUrl.searchParams.set("cursor", String(result.nextCursor));
+		}
 		c.executionCtx.waitUntil(
 			fetch(nextUrl.toString(), {
 				method: "POST",

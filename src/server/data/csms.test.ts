@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalOwnerId } from "./csms";
+import { canonicalOwnerId, ownerIdVariants } from "./csms";
 
 describe("canonicalOwnerId", () => {
 	it("maps a known duplicate owner id to its canonical @828collective.com id", () => {
@@ -17,5 +17,19 @@ describe("canonicalOwnerId", () => {
 
 	it("passes through an already-canonical id unchanged", () => {
 		expect(canonicalOwnerId("471622286")).toBe("471622286");
+	});
+});
+
+describe("ownerIdVariants", () => {
+	it("adds the duplicate-owner alias for a canonical id", () => {
+		expect(ownerIdVariants(["471622286"]).sort()).toEqual(["471622286", "577351169"].sort());
+	});
+
+	it("keeps ids that have no alias", () => {
+		expect(ownerIdVariants(["123"])).toEqual(["123"]);
+	});
+
+	it("does not add aliases for owners not asked for", () => {
+		expect(ownerIdVariants([])).toEqual([]);
 	});
 });

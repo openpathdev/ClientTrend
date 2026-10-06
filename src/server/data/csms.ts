@@ -46,6 +46,15 @@ export function canonicalOwnerId(hubspotOwnerId: string): string {
 	return CSM_OWNER_ID_ALIASES[hubspotOwnerId] ?? hubspotOwnerId;
 }
 
+/** Every Owner id that resolves to one of `ownerIds` — each id itself plus any duplicate-owner alias pointing at it — so a HubSpot search by `csm` finds companies still set to either variant. */
+export function ownerIdVariants(ownerIds: string[]): string[] {
+	const wanted = new Set(ownerIds);
+	const aliases = Object.entries(CSM_OWNER_ID_ALIASES)
+		.filter(([, canonical]) => wanted.has(canonical))
+		.map(([alias]) => alias);
+	return [...wanted, ...aliases];
+}
+
 /** Upserts one CSM row keyed on hubspot_owner_id — called once per HubSpot Owner at the start of each sync run, before Companies are processed (PRD §14). */
 export async function upsertCsmFromOwner(
 	supabase: SupabaseClient,

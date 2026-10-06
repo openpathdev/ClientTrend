@@ -1,9 +1,16 @@
 import type { CloudflareBindings } from "./bindings";
 import { createSupabaseClient } from "./supabase";
-import { fetchAllOwners, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger, resolveStateCode, HubspotRateLimitError } from "./hubspot";
-import { upsertCsmFromOwner, listCsmsWithOwnerId, listCsms, canonicalOwnerId } from "./data/csms";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllOwners, fetchCompanySyncProperties, searchCompanyIdsByCsm, fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger, resolveStateCode, HubspotRateLimitError } from "./hubspot";
+import { upsertCsmFromOwner, listCsmsWithOwnerId, listCsms, canonicalOwnerId, ownerIdVariants } from "./data/csms";
 import { listStatuses } from "./data/statuses";
-import { listHubspotLinkedClients, applyHubspotSync, markHubspotSyncStatus, createClientFromHubspot } from "./data/clients";
+import {
+	listHubspotLinkedClients,
+	applyHubspotSync,
+	markHubspotSyncStatus,
+	createClientFromHubspot,
+	listImportedHubspotCompanyIds,
+} from "./data/clients";
 import { createSyncRun, finishSyncRun, incrementSyncRunCounts, logSyncResult } from "./data/hubspotSyncLog";
 
 const MAX_RATE_LIMIT_RETRIES = 3;
@@ -20,6 +27,28 @@ const MAX_RATE_LIMIT_RETRIES = 3;
 // invocation for the same reason — combined with even one client's worth of
 // calls it was enough to blow the ceiling on its own (confirmed live).
 const BATCH_SIZE = 5;
+
+// Catch-up candidates cost up to ~7 subrequests each (1 property fetch, up
+// to 4 for fetchSubscriptionEligibility, 2 to create the client), plus ~6
+// fixed per invocation (search, imported list, CSM/status lookups, run
+// counts) — 4 per invocation keeps well under the ~50 ceiling.
+const CATCHUP_BATCH_SIZE = 4;
+
+export type SyncStepResult = {
+	runId: string;
+	clientsProcessed: number;
+	clientsFailed: number;
+	status: "succeeded" | "failed" | "partial" | "more";
+	/** Set with status "more": the next client batch to process. */
+	nextCursor?: number;
+	/** Set with status "more": the next invocation is the catch-up import, starting after company id `nextAfter` (absent = from the start). */
+	nextPhase?: "catchup";
+	nextAfter?: string;
+};
+
+function finalStatus(totals: { clientsProcessed: number; clientsFailed: number }): "succeeded" | "failed" | "partial" {
+	return totals.clientsFailed === 0 ? "succeeded" : totals.clientsProcessed === 0 ? "failed" : "partial";
+}
 
 /**
  * Syncs the 5 simple Company properties + CSM assignment + subscription
@@ -39,13 +68,7 @@ const BATCH_SIZE = 5;
 export async function runHubspotSync(
 	env: CloudflareBindings,
 	options?: { cursor?: number; runId?: string },
-): Promise<{
-	runId: string;
-	clientsProcessed: number;
-	clientsFailed: number;
-	status: "succeeded" | "failed" | "partial" | "more";
-	nextCursor?: number;
-}> {
+): Promise<SyncStepResult> {
 	const supabase = createSupabaseClient(env);
 	const runId = options?.runId ?? (await createSyncRun(supabase));
 
@@ -151,7 +174,14 @@ export async function runHubspotSync(
 			return { runId, clientsProcessed, clientsFailed, status: "more", nextCursor };
 		}
 
-		const status = totals.clientsFailed === 0 ? "succeeded" : totals.clientsProcessed === 0 ? "failed" : "partial";
+		// All linked clients done — hand off to the catch-up import (its own
+		// invocation(s), for subrequest budget). Skipped when HubSpot is
+		// rate-limiting us: the catch-up would only add more calls.
+		if (!rateLimited) {
+			return { runId, clientsProcessed, clientsFailed, status: "more", nextPhase: "catchup" };
+		}
+
+		const status = finalStatus(totals);
 		await finishSyncRun(supabase, runId, { status });
 		return { runId, clientsProcessed: totals.clientsProcessed, clientsFailed: totals.clientsFailed, status };
 	} catch (err) {
@@ -190,15 +220,36 @@ export async function tryAutoImportCompany(env: CloudflareBindings, hubspotCompa
 	if (existing.error) throw new Error(existing.error.message);
 	if (existing.data) return { status: "already_imported", clientId: (existing.data as { id: string }).id };
 
+	return importCompanyIfEligible(env, supabase, hubspotCompanyId, await loadAutoImportContext(supabase));
+}
+
+type AutoImportContext = {
+	/** HubSpot Owner id -> csms.id, active CSMs only (canonical owner ids; resolve a company's `csm` through `canonicalOwnerId` first). */
+	activeCsmByOwnerId: Map<string, string>;
+	defaultStatusId: string;
+};
+
+async function loadAutoImportContext(supabase: SupabaseClient): Promise<AutoImportContext> {
+	const [activeCsms, ownerLinks, statuses] = await Promise.all([listCsms(supabase), listCsmsWithOwnerId(supabase), listStatuses(supabase)]);
+	const activeCsmIds = new Set(activeCsms.map((c) => c.id));
+	return {
+		activeCsmByOwnerId: new Map(ownerLinks.filter((o) => activeCsmIds.has(o.id)).map((o) => [o.hubspotOwnerId, o.id])),
+		defaultStatusId: statuses[0].id,
+	};
+}
+
+/** The eligibility check + import shared by the webhook auto-import and the daily catch-up (see `tryAutoImportCompany`'s doc comment for the rules). Assumes the caller already knows the company isn't imported yet. */
+async function importCompanyIfEligible(
+	env: CloudflareBindings,
+	supabase: SupabaseClient,
+	hubspotCompanyId: string,
+	ctx: AutoImportContext,
+): Promise<AutoImportResult> {
 	const result = await fetchCompanySyncProperties(env, hubspotCompanyId);
 	if (result.status === "not_found") return { status: "not_found" };
 	const props = result.properties;
 
-	const [activeCsms, ownerLinks, statuses] = await Promise.all([listCsms(supabase), listCsmsWithOwnerId(supabase), listStatuses(supabase)]);
-	const activeCsmIds = new Set(activeCsms.map((c) => c.id));
-	const activeCsmByOwnerId = new Map(ownerLinks.filter((o) => activeCsmIds.has(o.id)).map((o) => [o.hubspotOwnerId, o.id]));
-
-	const csmId = props.csm ? activeCsmByOwnerId.get(canonicalOwnerId(props.csm)) : undefined;
+	const csmId = props.csm ? ctx.activeCsmByOwnerId.get(canonicalOwnerId(props.csm)) : undefined;
 	if (!csmId) return { status: "ineligible", reason: `csm "${props.csm ?? "(none)"}" is not one of the active CSMs` };
 
 	const { purchasedProWebsite, purchasedBaseWebsite } = await fetchSubscriptionEligibility(env, hubspotCompanyId);
@@ -215,11 +266,77 @@ export async function tryAutoImportCompany(env: CloudflareBindings, hubspotCompa
 		stateCode: resolveStateCode(props.state, props.hs_state_code),
 		legalStatus: normalizeHubspotText(props.legal_status),
 		csmId,
-		defaultStatusId: statuses[0].id,
+		defaultStatusId: ctx.defaultStatusId,
 		purchasedProWebsite,
 		purchasedBaseWebsite,
 		newClientGoal: parseHubspotInteger(props.hj_new_client_goal),
 		amadGoal: parseHubspotInteger(props.hj_amad_goal),
 	});
 	return { status: "imported", clientId: client.id };
+}
+
+/** HubSpot object ids are numeric strings, too long to compare safely as numbers. */
+function compareHubspotIds(a: string, b: string): number {
+	return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+}
+
+/**
+ * Final phase of every sync run (2026-10-06): imports companies that are
+ * eligible but were never imported. Auto-import only fires when a
+ * company's `csm` *changes* (webhook), so a company that became eligible
+ * before the webhook existed — or whose change event never arrived — was
+ * never picked up (found: HOPE CENTER of LIVINGSTON COUNTY and Nest
+ * Pregnancy Care, both csm set before the webhook went live). Candidates
+ * are companies whose `csm` is an active CSM (either duplicate-owner
+ * variant) and that aren't imported yet; each goes through exactly the
+ * same check as the webhook (`importCompanyIfEligible`). Processes
+ * CATCHUP_BATCH_SIZE candidates per invocation, ascending by company id,
+ * resuming after `afterId`; the route self-chains while more remain.
+ * Imports count toward the run's clients_processed and are logged.
+ */
+export async function runCatchupImport(env: CloudflareBindings, runId: string, afterId?: string): Promise<SyncStepResult> {
+	const supabase = createSupabaseClient(env);
+	let imported = 0;
+	let failed = 0;
+	try {
+		const ctx = await loadAutoImportContext(supabase);
+		const ownerIds = ownerIdVariants([...ctx.activeCsmByOwnerId.keys()]);
+		const [companyIds, importedIds] = await Promise.all([
+			searchCompanyIdsByCsm(env, ownerIds),
+			listImportedHubspotCompanyIds(supabase),
+		]);
+		const candidates = companyIds
+			.filter((id) => !importedIds.has(id) && (afterId === undefined || compareHubspotIds(id, afterId) > 0))
+			.sort(compareHubspotIds);
+		const batch = candidates.slice(0, CATCHUP_BATCH_SIZE);
+
+		for (const companyId of batch) {
+			try {
+				const result = await importCompanyIfEligible(env, supabase, companyId, ctx);
+				if (result.status === "imported") {
+					imported++;
+					await logSyncResult(supabase, runId, result.clientId, "synced", `Imported by daily catch-up (HubSpot company ${companyId})`);
+				}
+			} catch (err) {
+				failed++;
+				console.error(`Catch-up import of HubSpot company ${companyId} failed:`, err);
+			}
+		}
+
+		const totals = await incrementSyncRunCounts(supabase, runId, imported, failed);
+		if (candidates.length > batch.length) {
+			return { runId, clientsProcessed: imported, clientsFailed: failed, status: "more", nextPhase: "catchup", nextAfter: batch[batch.length - 1] };
+		}
+		const status = finalStatus(totals);
+		await finishSyncRun(supabase, runId, { status });
+		return { runId, clientsProcessed: totals.clientsProcessed, clientsFailed: totals.clientsFailed, status };
+	} catch (err) {
+		// The regular sync already finished; a catch-up failure shouldn't
+		// mark that work failed, just record why the catch-up didn't run.
+		const message = err instanceof Error ? err.message : String(err);
+		const totals = await incrementSyncRunCounts(supabase, runId, imported, failed);
+		const status = finalStatus(totals);
+		await finishSyncRun(supabase, runId, { status, errorSummary: `Catch-up import failed: ${message}` });
+		return { runId, clientsProcessed: totals.clientsProcessed, clientsFailed: totals.clientsFailed, status };
+	}
 }

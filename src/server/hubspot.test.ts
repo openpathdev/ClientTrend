@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { normalizeHubspotText, parseHubspotInteger, resolveStateCode } from "./hubspot";
+import { describe, expect, it, vi } from "vitest";
+import { fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger, resolveStateCode } from "./hubspot";
 
 describe("normalizeHubspotText", () => {
 	it("passes through a clean value unchanged", () => {
@@ -71,5 +71,15 @@ describe("resolveStateCode", () => {
 	it("returns null rather than a value outside the states table", () => {
 		expect(resolveStateCode("Ontario", "ON")).toBe(null);
 		expect(resolveStateCode(null, null)).toBe(null);
+	});
+});
+
+describe("fetchSubscriptionEligibility", () => {
+	it("treats an always-eligible exception (TPCN) as eligible without calling HubSpot", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		const result = await fetchSubscriptionEligibility({ HUBSPOT_API_TOKEN: "unused" } as never, "31573504173");
+		expect(result).toEqual({ purchasedProWebsite: true, purchasedBaseWebsite: false });
+		expect(fetchSpy).not.toHaveBeenCalled();
+		fetchSpy.mockRestore();
 	});
 });

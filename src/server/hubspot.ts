@@ -225,6 +225,21 @@ function unionEligibility(a: SubscriptionEligibility, b: SubscriptionEligibility
  * client and force a smaller sync `BATCH_SIZE` — same tradeoff already made
  * for `CSM_OWNER_ID_ALIASES` in csms.ts.
  */
+/**
+ * Companies that must be listed in the app even though no Website Pro/Base
+ * purchase can be found for them (2026-10-14 user decision). TPCN's website
+ * record has no subscriptions or deals; the paying account (Texas Pregnancy
+ * Care Network, 18105452458) has a "TPCN Managed Monthly support"
+ * subscription with no website package line item. Treated as Pro — the
+ * Pro/Base flags only gate visibility (Overview filter), nothing displays
+ * which one. Short-circuits before any HubSpot calls, so it applies to the
+ * daily sync (keeps the client visible), the catch-up import, and the
+ * webhook auto-import alike.
+ */
+const ALWAYS_ELIGIBLE_COMPANY_IDS = new Set([
+	"31573504173", // TPCN Abortion Pill website
+]);
+
 const DEAL_FALLBACK_COMPANY_IDS = new Set([
 	"31272825243", // Divine Fountain of Hope
 	"57248610400", // Adira Clinic
@@ -272,6 +287,8 @@ const DEAL_FALLBACK_COMPANY_IDS = new Set([
  * but still need it — see that constant's comment.
  */
 export async function fetchSubscriptionEligibility(env: CloudflareBindings, hubspotCompanyId: string): Promise<SubscriptionEligibility> {
+	if (ALWAYS_ELIGIBLE_COMPANY_IDS.has(hubspotCompanyId)) return { purchasedProWebsite: true, purchasedBaseWebsite: false };
+
 	const assocRes = await hubspotFetch(env, `/crm/v4/objects/companies/${hubspotCompanyId}/associations/subscriptions`);
 	if (!assocRes.ok) throw new Error(`Subscription associations fetch failed: HTTP ${assocRes.status}`);
 	const assocBody = (await assocRes.json()) as { results: { toObjectId: number }[] };

@@ -73,7 +73,7 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -344,6 +344,11 @@ def compute_month_metrics(sessions: list, month: str, tz: str = "UTC") -> dict:
 	}
 
 
+# Days of history in each her_journey_org_data file — HerJourney DataPull's
+# `_pull_hopesync(days=214)`. Keep in sync if that changes.
+HERJOURNEY_PULL_DAYS = 214
+
+
 def trailing_months(count: int) -> list[str]:
 	now = datetime.now(timezone.utc)
 	months = []
@@ -379,8 +384,17 @@ def sync_client(client: dict, metric_id_by_key: dict, month_count: int, dry_run:
 		file=sys.stderr,
 	)
 
+	# The file only holds HerJourney DataPull's trailing HERJOURNEY_PULL_DAYS,
+	# so any month starting before that window is missing data (wholly or
+	# partly) — writing it would put 0s / partial counts over history that
+	# scripts/backfill_org_data.py filled in from HopeSync directly. A day of
+	# slack covers the center-local vs UTC offset.
+	window_start = datetime.now(ZoneInfo(tz)) - timedelta(days=HERJOURNEY_PULL_DAYS - 1)
 	rows = []
 	for month in trailing_months(month_count):
+		if _month_bounds(month, tz)[0] < window_start:
+			print(f"  {month}: skipped, starts before the file's {HERJOURNEY_PULL_DAYS}-day window", file=sys.stderr)
+			continue
 		values = compute_month_metrics(sessions, month, tz)
 		if not has_form_submissions:
 			del values["form_fills"]

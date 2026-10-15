@@ -5,6 +5,9 @@ tasks.md
 # reference code from another app, not part of this project
 ProcessData/
 
+# raw HopeSync pulls cached by scripts/backfill_org_data.py
+backfill-cache/
+
 # build output
 dist/
 # generated types

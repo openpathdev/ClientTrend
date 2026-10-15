@@ -26,3 +26,12 @@ HUBSPOT_WEBHOOK_CLIENT_SECRET=
 # falls back to a fixed dev identity when CF_ACCESS_TEAM_DOMAIN is unset.
 CF_ACCESS_TEAM_DOMAIN=
 CF_ACCESS_AUD=
+
+# HopeSync, used only by scripts/backfill_org_data.py (one-off history
+# backfill, run by hand). Same values as HerJourney DataPull's
+# HOPESYNC_API_KEY and the `sig` query param of its HopeSync URL.
+HOPESYNC_API_KEY=
+HOPESYNC_SIG=
+# HerJourney's ProcessData/ folder; defaults to the sibling checkout
+# ../HerJourney/HJApp/AppData-SB/ProcessData when unset.
+PROCESSDATA_DIR=

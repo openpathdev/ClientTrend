@@ -62,6 +62,8 @@ export type ClientRow = {
 	newClientGoal: number | null;
 	amadGoal: number | null;
 	integrationFlags: Record<IntegrationFlag, boolean>;
+	/** Whether the client page shows the per-client Campaigns table (off by default; turning it off keeps the data). */
+	campaignsEnabled: boolean;
 };
 
 export type ClientFilters = {
@@ -131,7 +133,7 @@ export type MonthlyDataValue = {
 export type PaidAdsMetric = MonthlyMetric;
 export type PaidAdsDataValue = MonthlyDataValue;
 
-export type CommentSection = "monthly_data" | "paid_ads";
+export type CommentSection = "monthly_data" | "paid_ads" | "campaigns";
 
 export type Comment = {
 	id: string;

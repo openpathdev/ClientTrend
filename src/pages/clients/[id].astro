@@ -13,7 +13,7 @@ import { renderClientHeader } from "../../server/render/clientHeader";
 import { renderNotesSection } from "../../server/render/notesSection";
 import { renderChangesSection } from "../../server/render/changesSection";
 import { renderLinksSection } from "../../server/render/linksSection";
-import { renderMonthlyDataSection, renderPaidAdsSection } from "../../server/clientDetailSections";
+import { renderMonthlyDataSection, renderPaidAdsSection, renderCampaignsSection } from "../../server/clientDetailSections";
 import { isValidUuid } from "../../server/validation";
 
 const { id } = Astro.params;
@@ -30,6 +30,7 @@ let changesHtml = "";
 let linksHtml = "";
 let monthlyDataHtml = "";
 let paidAdsHtml = "";
+let campaignsHtml = "";
 
 if (client) {
 	const [statuses, changes, links] = await Promise.all([
@@ -42,9 +43,10 @@ if (client) {
 	notesHtml = (await renderNotesSection(client)).toString();
 	changesHtml = (await renderChangesSection(client.id, changes)).toString();
 	linksHtml = (await renderLinksSection(client.id, links)).toString();
-	[monthlyDataHtml, paidAdsHtml] = await Promise.all([
+	[monthlyDataHtml, paidAdsHtml, campaignsHtml] = await Promise.all([
 		renderMonthlyDataSection(supabase, client, statuses, DEFAULT_MONTH_WINDOW),
 		renderPaidAdsSection(supabase, client, statuses, DEFAULT_MONTH_WINDOW),
+		renderCampaignsSection(supabase, client, statuses, DEFAULT_MONTH_WINDOW),
 	]);
 }
 ---
@@ -68,6 +70,7 @@ if (client) {
 					</div>
 					<Fragment set:html={monthlyDataHtml} />
 					<Fragment set:html={paidAdsHtml} />
+					<Fragment set:html={campaignsHtml} />
 				</div>
 			) : (
 				<div class="mt-6 rounded-2xl border border-dashed border-card-border bg-surface p-10 text-center">

@@ -10,6 +10,7 @@ const CLIENT_SELECT = `
 	ad_spend_per_month, paid_ads_go_live_date, go_live_date,
 	baseline_clients, baseline_amad, hubspot_new_client_goal, hubspot_amad_goal,
 	integration_hs, integration_iw, integration_clara, integration_acuity, integration_ekyros, integration_coolfocus,
+	campaigns_enabled,
 	csm:csms ( id, name, email, active ),
 	status:statuses!inner ( id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active )
 `;
@@ -51,6 +52,7 @@ type ClientQueryRow = {
 	integration_acuity: boolean;
 	integration_ekyros: boolean;
 	integration_coolfocus: boolean;
+	campaigns_enabled: boolean;
 	csm: { id: string; name: string; email: string | null; active: boolean } | null;
 	status: {
 		id: string;
@@ -97,6 +99,7 @@ function mapClient(row: ClientQueryRow): ClientRow {
 			ekyros: row.integration_ekyros,
 			coolfocus: row.integration_coolfocus,
 		},
+		campaignsEnabled: row.campaigns_enabled,
 		status: {
 			id: row.status.id,
 			name: row.status.name,

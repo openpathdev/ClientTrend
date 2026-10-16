@@ -10,9 +10,11 @@ const COMMENT_ICON_PATH =
 const COMMENT_ICON_PATH_SOLID =
 	'<path d="M20 2H4c-1.103 0-2 .897-2 2v12c0 1.103.897 2 2 2h3v4.434l7.740-4.434H20c1.103 0 2-.897 2-2V4c0-1.103-.897-2-2-2z"/>';
 
-/** Internal `section` enum vs. its URL path segment (PRD §10) — same mapping used by every route under `/api/clients/:id/{monthly-data,paid-ads}/...`. */
-function sectionBasePath(section: CommentSection): string {
-	return section === "monthly_data" ? "monthly-data" : "paid-ads";
+/** Internal `section` enum vs. its URL path segment (PRD §10) — same mapping used by every route under `/api/clients/:id/{monthly-data,paid-ads,campaigns}/...`. */
+const SECTION_PATHS: Record<CommentSection, string> = { monthly_data: "monthly-data", paid_ads: "paid-ads", campaigns: "campaigns" };
+
+export function sectionBasePath(section: CommentSection): string {
+	return SECTION_PATHS[section];
 }
 
 function highlightEndpoint(clientId: string, section: CommentSection, metricId: string, month: string): string {
@@ -319,8 +321,12 @@ export function renderMonthlyDataTable(params: {
 	previousMonthCount?: number;
 	/** Banner under the header after a spreadsheet paste is saved or undone (see renderPasteNotice). */
 	notice?: ReturnType<typeof html>;
+	/** Custom row-label cell content — Campaigns uses it for the editable name and delete button; default is the metric's label. */
+	rowLabel?: (metric: MonthlyMetric) => ReturnType<typeof html>;
+	/** Content under the table — Campaigns uses it for "+ Add campaign". */
+	footer?: ReturnType<typeof html>;
 }) {
-	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra, previousMonthCount, notice } = params;
+	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra, previousMonthCount, notice, rowLabel, footer } = params;
 	const byKey = new Map(values.map((v) => [cellKey(v.metricId, v.month), v]));
 	const statusesById = new Map(statuses.map((s) => [s.id, s]));
 	const scrollInit =
@@ -378,7 +384,7 @@ export function renderMonthlyDataTable(params: {
 									scope="row"
 									class="sticky left-0 z-10 whitespace-nowrap border-r border-row-rule px-3 py-2 text-left font-sans text-[13px] font-normal text-ink ${bgClass}"
 								>
-									${metric.label}
+									${rowLabel ? rowLabel(metric) : metric.label}
 								</th>
 								${months.map((month) => {
 									const dataValue = byKey.get(cellKey(metric.id, month));
@@ -393,5 +399,6 @@ export function renderMonthlyDataTable(params: {
 				</tbody>
 			</table>
 		</div>
+		${footer ?? ""}
 	</section>`;
 }

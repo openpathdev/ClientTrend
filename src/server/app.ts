@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { html } from "hono/html";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AppEnv } from "./bindings";
 import { createSupabaseClient } from "./supabase";
 import { listStatuses } from "./data/statuses";
@@ -21,6 +22,21 @@ import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
 import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus, listMonthlyDataValues, bulkUpsertMonthlyDataValues } from "./data/monthlyData";
 import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
 import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus, listPaidAdsDataValues, bulkUpsertPaidAdsDataValues } from "./data/paidAdsData";
+import {
+	listCampaigns,
+	createCampaigns,
+	renameCampaign,
+	deleteCampaign,
+	setCampaignsEnabled,
+	parseCampaignName,
+	STARTER_CAMPAIGN_COUNT,
+	listCampaignDataValues,
+	getCampaignDataValue,
+	upsertCampaignDataValue,
+	bulkUpsertCampaignDataValues,
+	setCampaignDataValueStatus,
+} from "./data/campaigns";
+import { renderCampaignName } from "./render/campaignsSection";
 import { createPasteImport, deletePasteImport, getPasteImport, markPasteImportUndone, type PasteChange } from "./data/pasteImports";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, runCatchupImport, tryAutoImportCompany } from "./syncHubspot";
@@ -39,7 +55,7 @@ import { renderMetricCell, renderCellMarkerButton } from "./render/monthlyDataTa
 import { renderCommentPopover } from "./render/commentPanel";
 import { renderMetricAdminPanel } from "./render/metricAdminPanel";
 import { renderPaidAdsSettings } from "./render/paidAdsSettings";
-import { renderMonthlyDataSection, renderPaidAdsSection } from "./clientDetailSections";
+import { renderMonthlyDataSection, renderPaidAdsSection, renderCampaignsSection } from "./clientDetailSections";
 import { DEFAULT_MONTH_WINDOW, trailingMonths } from "./months";
 import { isValidLinkUrl, isValidUuid, validateLength, parseMonthlyCellValue } from "./validation";
 import { PASTE_MAX_CHARS, cellsToWrite, displayText, isValidMonth, parseClipboardTable, planPaste } from "./pasteImport";
@@ -470,7 +486,7 @@ const PASTE_SECTIONS = [
 	{
 		path: "monthly-data",
 		section: "monthly_data",
-		listMetrics: listMonthlyMetrics,
+		listMetrics: (supabase: SupabaseClient) => listMonthlyMetrics(supabase),
 		listValues: listMonthlyDataValues,
 		bulkUpsert: bulkUpsertMonthlyDataValues,
 		renderSection: renderMonthlyDataSection,
@@ -478,10 +494,18 @@ const PASTE_SECTIONS = [
 	{
 		path: "paid-ads",
 		section: "paid_ads",
-		listMetrics: listPaidAdsMetrics,
+		listMetrics: (supabase: SupabaseClient) => listPaidAdsMetrics(supabase),
 		listValues: listPaidAdsDataValues,
 		bulkUpsert: bulkUpsertPaidAdsDataValues,
 		renderSection: renderPaidAdsSection,
+	},
+	{
+		path: "campaigns",
+		section: "campaigns",
+		listMetrics: (supabase: SupabaseClient, clientId: string) => listCampaigns(supabase, clientId),
+		listValues: listCampaignDataValues,
+		bulkUpsert: bulkUpsertCampaignDataValues,
+		renderSection: renderCampaignsSection,
 	},
 ] as const;
 
@@ -499,7 +523,7 @@ for (const config of PASTE_SECTIONS) {
 		if (text.length > PASTE_MAX_CHARS) return { ok: false, error: "That's too much to paste at once. Copy a smaller block of cells." } as const;
 
 		const supabase = createSupabaseClient(c.env);
-		const metrics = await config.listMetrics(supabase);
+		const metrics = await config.listMetrics(supabase, clientId);
 		const metric = metrics.find((m) => m.id === metricId);
 		if (!metric) return { ok: false, error: "That row no longer exists. Reload the page and try again." } as const;
 		if (metric.source === "hubspot") return { ok: false, error: "This row is filled automatically from HubSpot and can't be pasted into." } as const;
@@ -592,9 +616,15 @@ for (const config of PASTE_SECTIONS) {
 		}
 
 		const months = record.changes.map((ch) => ch.month).sort();
-		const current = await config.listValues(supabase, clientId, months[0], months[months.length - 1]);
+		const [current, metrics] = await Promise.all([
+			config.listValues(supabase, clientId, months[0], months[months.length - 1]),
+			config.listMetrics(supabase, clientId),
+		]);
 		const currentByKey = new Map(current.map((v) => [`${v.metricId}|${v.month}`, v]));
+		// A row deleted since the paste (e.g. a removed campaign) has nothing left to restore.
+		const liveMetricIds = new Set(metrics.map((m) => m.id));
 		const revert = record.changes.filter((ch) => {
+			if (!liveMetricIds.has(ch.metric_id)) return false;
 			const now = currentByKey.get(`${ch.metric_id}|${ch.month}`);
 			return displayText(now) === displayText({ value: ch.new_value, valueText: ch.new_value_text });
 		});
@@ -713,15 +743,154 @@ app.get("/api/clients/:id/paid-ads", async (c) => {
 	return c.html(renderPaidAdsSection(supabase, client, statuses, monthCount, previousMonthCount));
 });
 
-// ---- Comments (PRD §12), shared by Monthly Data and Paid Ads ----
+// ---- Campaigns (per-client rows under Paid Ads; see the campaigns migration) ----
 
-function readSection(value: unknown): CommentSection {
-	return value === "paid_ads" ? "paid_ads" : "monthly_data";
+/** Reads the shared "months" form/query field the Campaigns controls send, so a re-render keeps the window the CSM had loaded. */
+function readCampaignMonths(c: Context<AppEnv>, body?: Record<string, unknown>): number {
+	const raw = body && typeof body.months === "string" ? body.months : c.req.query("months");
+	return readMonthCount(raw);
 }
 
-/** Looks up the metric in the catalog matching `section` — this app-level check is what replaces the DB FK (comments.metric_id has none, PRD §12). */
-async function findMetric(supabase: ReturnType<typeof createSupabaseClient>, section: CommentSection, metricId: string) {
-	const metrics = section === "paid_ads" ? await listPaidAdsMetrics(supabase) : await listMonthlyMetrics(supabase);
+async function renderCampaignsFor(c: Context<AppEnv>, clientId: string, monthCount: number) {
+	const supabase = createSupabaseClient(c.env);
+	const [client, statuses] = await Promise.all([getClientById(supabase, clientId), listStatuses(supabase)]);
+	if (!client) return c.text("Client not found", 404);
+	return c.html(await renderCampaignsSection(supabase, client, statuses, monthCount));
+}
+
+app.patch("/api/clients/:id/campaigns/enabled", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	if (!isValidUuid(clientId)) return c.text("Client not found", 404);
+	const body = await c.req.parseBody();
+	const enabled = body.checked === "true";
+	await setCampaignsEnabled(supabase, clientId, enabled);
+	// First switch-on: start the company off with a few blank rows to fill in.
+	if (enabled && (await listCampaigns(supabase, clientId)).length === 0) {
+		await createCampaigns(supabase, clientId, STARTER_CAMPAIGN_COUNT, c.get("userEmail"));
+	}
+	return renderCampaignsFor(c, clientId, readCampaignMonths(c, body));
+});
+
+app.post("/api/clients/:id/campaigns", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	if (!isValidUuid(clientId)) return c.text("Client not found", 404);
+	const body = await c.req.parseBody();
+	await createCampaigns(supabase, clientId, 1, c.get("userEmail"));
+	return renderCampaignsFor(c, clientId, readCampaignMonths(c, body));
+});
+
+app.patch("/api/clients/:id/campaigns/:campaignId/name", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const campaignId = c.req.param("campaignId");
+	if (!isValidUuid(clientId) || !isValidUuid(campaignId)) return c.text("Not found", 404);
+	const body = await c.req.parseBody();
+	const parsed = parseCampaignName(typeof body.name === "string" ? body.name : "");
+	if (!parsed.ok) return c.text(parsed.error, 400);
+	const renamed = await renameCampaign(supabase, clientId, campaignId, parsed.name);
+	if (!renamed) return c.text("Campaign not found", 404);
+	return c.html(renderCampaignName(clientId, renamed, readCampaignMonths(c, body)));
+});
+
+app.delete("/api/clients/:id/campaigns/:campaignId", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	const campaignId = c.req.param("campaignId");
+	if (!isValidUuid(clientId) || !isValidUuid(campaignId)) return c.text("Not found", 404);
+	await deleteCampaign(supabase, clientId, campaignId);
+	// htmx sends hx-vals for DELETE as query params (see the comment DELETE route).
+	return renderCampaignsFor(c, clientId, readCampaignMonths(c));
+});
+
+app.get("/api/clients/:id/campaigns", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const client = await getClientById(supabase, c.req.param("id"));
+	if (!client) return c.text("Client not found", 404);
+	const statuses = await listStatuses(supabase);
+	const monthCount = readMonthCount(c.req.query("months"));
+	const previousMonthCount = readPreviousMonthCount(c.req.query("previousMonths"));
+	return c.html(await renderCampaignsSection(supabase, client, statuses, monthCount, previousMonthCount));
+});
+
+/** Loads a campaign cell's context — the campaign must belong to this client, which is what stands in for the catalog lookup the other sections do. */
+async function loadCampaignCell(c: Context<AppEnv>) {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id") ?? "";
+	const campaignId = c.req.param("campaignId") ?? "";
+	const month = c.req.param("month") ?? "";
+	if (!isValidUuid(clientId) || !isValidUuid(campaignId) || !isValidMonth(month)) return null;
+	const [campaigns, statuses] = await Promise.all([listCampaigns(supabase, clientId), listStatuses(supabase)]);
+	const index = campaigns.findIndex((m) => m.id === campaignId);
+	if (index === -1) return null;
+	const bgClass = index % 2 === 0 ? "bg-surface" : "bg-zebra-row";
+	return { supabase, clientId, campaignId, month, metric: campaigns[index], statuses, bgClass };
+}
+
+app.put("/api/clients/:id/campaigns/:campaignId/:month", async (c) => {
+	const cell = await loadCampaignCell(c);
+	if (!cell) return c.text("Not found", 404);
+	const { supabase, clientId, campaignId, month, metric, statuses, bgClass } = cell;
+	const body = await c.req.parseBody();
+	const raw = typeof body.value === "string" ? body.value : "";
+	const parsed = parseMonthlyCellValue(raw, metric.valueType, metric.minValue, metric.maxValue);
+
+	if (!parsed.ok) {
+		const current = await getCampaignDataValue(supabase, clientId, campaignId, month);
+		const status = current?.statusId ? (statuses.find((s) => s.id === current.statusId) ?? null) : null;
+		const cellComments = await listComments(supabase, clientId, "campaigns", campaignId, month);
+		return c.html(
+			renderMetricCell(
+				clientId,
+				"campaigns",
+				metric,
+				month,
+				{ id: current?.id ?? "", clientId, metricId: campaignId, month, value: null, valueText: raw, statusId: current?.statusId ?? null, updatedBy: null, updatedAt: "" },
+				bgClass,
+				status,
+				statuses,
+				cellComments,
+			),
+			400,
+		);
+	}
+
+	const saved = await upsertCampaignDataValue(supabase, { clientId, metricId: campaignId, month, value: parsed.value, valueText: parsed.valueText, updatedBy: c.get("userEmail") });
+	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
+	const cellComments = await listComments(supabase, clientId, "campaigns", campaignId, month);
+	return c.html(renderMetricCell(clientId, "campaigns", metric, month, saved, bgClass, status, statuses, cellComments));
+});
+
+app.patch("/api/clients/:id/campaigns/:campaignId/:month/highlight", async (c) => {
+	const cell = await loadCampaignCell(c);
+	if (!cell) return c.text("Not found", 404);
+	const { supabase, clientId, campaignId, month, metric, statuses, bgClass } = cell;
+	const body = await c.req.parseBody();
+	const raw = typeof body.statusId === "string" ? body.statusId : "";
+	const statusId = raw === "" ? null : raw;
+	if (statusId !== null && !statuses.some((s) => s.id === statusId)) return c.text("Unknown status", 400);
+
+	const saved = await setCampaignDataValueStatus(supabase, { clientId, metricId: campaignId, month, statusId });
+	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
+	const cellComments = await listComments(supabase, clientId, "campaigns", campaignId, month);
+	return c.html(renderMetricCell(clientId, "campaigns", metric, month, saved, bgClass, status, statuses, cellComments));
+});
+
+// ---- Comments (PRD §12), shared by Monthly Data, Paid Ads and Campaigns ----
+
+function readSection(value: unknown): CommentSection {
+	return value === "paid_ads" || value === "campaigns" ? value : "monthly_data";
+}
+
+/** Looks up the row (catalog metric, or this client's campaign) matching `section` — this app-level check is what replaces the DB FK (comments.metric_id has none, PRD §12). */
+async function findMetric(supabase: ReturnType<typeof createSupabaseClient>, section: CommentSection, metricId: string, clientId: string) {
+	const metrics =
+		section === "paid_ads"
+			? await listPaidAdsMetrics(supabase)
+			: section === "campaigns"
+				? await listCampaigns(supabase, clientId)
+				: await listMonthlyMetrics(supabase);
 	return metrics.find((m) => m.id === metricId) ?? null;
 }
 
@@ -744,7 +913,7 @@ app.post("/api/clients/:id/comments", async (c) => {
 	const month = typeof body.month === "string" ? body.month : "";
 	const commentBody = typeof body.body === "string" ? body.body : "";
 
-	const metric = await findMetric(supabase, section, metricId);
+	const metric = await findMetric(supabase, section, metricId, clientId);
 	if (!metric) return c.text("Unknown metric", 404);
 
 	if (!validateLength(commentBody, 1, 2000)) {
@@ -774,7 +943,7 @@ app.patch("/api/clients/:id/comments/:commentId", async (c) => {
 
 	await updateComment(supabase, commentId, commentBody.trim(), c.get("userEmail"));
 	const comments = await listComments(supabase, clientId, section, metricId, month);
-	const metric = await findMetric(supabase, section, metricId);
+	const metric = await findMetric(supabase, section, metricId, clientId);
 	if (!metric) return c.text("Unknown metric", 404);
 	return c.html(html`${renderCellMarkerButton(clientId, section, metric, month, comments, true)}${renderCommentPopover(clientId, section, metricId, month, comments)}`);
 });
@@ -791,7 +960,7 @@ app.delete("/api/clients/:id/comments/:commentId", async (c) => {
 
 	await deleteComment(supabase, c.req.param("commentId"));
 	const comments = await listComments(supabase, clientId, section, metricId, month);
-	const metric = await findMetric(supabase, section, metricId);
+	const metric = await findMetric(supabase, section, metricId, clientId);
 	if (!metric) return c.text("Unknown metric", 404);
 	return c.html(html`${renderCellMarkerButton(clientId, section, metric, month, comments, true)}${renderCommentPopover(clientId, section, metricId, month, comments)}`);
 });

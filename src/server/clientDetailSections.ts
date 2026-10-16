@@ -8,6 +8,8 @@ import { listPaidAdsDataValues } from "./data/paidAdsData";
 import { listCommentsForRange } from "./data/comments";
 import { renderMonthlyDataTable } from "./render/monthlyDataTable";
 import { renderPaidAdsSettings } from "./render/paidAdsSettings";
+import { listCampaigns, listCampaignDataValues } from "./data/campaigns";
+import { renderAddCampaignButton, renderCampaignName, renderCampaignsOff, renderCampaignsToggle } from "./render/campaignsSection";
 
 /**
  * Fetch-then-render orchestration for the Monthly Data / Paid Ads sections
@@ -83,5 +85,38 @@ export async function renderPaidAdsSection(
 		headerExtra: await renderPaidAdsSettings(client),
 		previousMonthCount,
 		notice,
+	}).toString();
+}
+
+/** Per-client Campaigns table — only queried and drawn while the client has it switched on. */
+export async function renderCampaignsSection(
+	supabase: SupabaseClient,
+	client: ClientRow,
+	statuses: Status[],
+	monthCount: number,
+	previousMonthCount?: number,
+	notice?: Parameters<typeof renderMonthlyDataTable>[0]["notice"],
+): Promise<string> {
+	if (!client.campaignsEnabled) return renderCampaignsOff(client.id, monthCount).toString();
+	const months = trailingMonths(monthCount);
+	const [metrics, values, comments] = await Promise.all([
+		listCampaigns(supabase, client.id),
+		listCampaignDataValues(supabase, client.id, months[0], months[months.length - 1]),
+		listCommentsForRange(supabase, client.id, "campaigns", months[0], months[months.length - 1]),
+	]);
+	return renderMonthlyDataTable({
+		clientId: client.id,
+		section: "campaigns",
+		title: "Campaigns",
+		metrics,
+		months,
+		values,
+		statuses,
+		comments,
+		headerExtra: renderCampaignsToggle(client.id, true, monthCount),
+		previousMonthCount,
+		notice,
+		rowLabel: (campaign) => renderCampaignName(client.id, campaign, monthCount),
+		footer: renderAddCampaignButton(client.id, monthCount),
 	}).toString();
 }

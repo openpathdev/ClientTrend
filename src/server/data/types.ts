@@ -35,7 +35,7 @@ export const INTEGRATION_FLAG_LABELS: Record<IntegrationFlag, string> = {
 	clara: "Clara",
 	acuity: "Acuity",
 	ekyros: "Ekyros",
-	coolfocus: "CoolFocus",
+	coolfocus: "CF",
 };
 
 export type ClientRow = {

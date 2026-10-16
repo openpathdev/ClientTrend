@@ -27,13 +27,15 @@ export type StateRef = {
 };
 
 /** Which external systems a center is on (PRD §5/§8) — manual, per-client toggles shown as checkboxes on the Overview card. Not HubSpot-owned, not derived from any metric. */
-export const INTEGRATION_FLAGS = ["hs", "iw", "acuity", "ekyros"] as const;
+export const INTEGRATION_FLAGS = ["hs", "iw", "clara", "acuity", "ekyros", "coolfocus"] as const;
 export type IntegrationFlag = (typeof INTEGRATION_FLAGS)[number];
 export const INTEGRATION_FLAG_LABELS: Record<IntegrationFlag, string> = {
 	hs: "HS",
 	iw: "IW",
+	clara: "Clara",
 	acuity: "Acuity",
 	ekyros: "Ekyros",
+	coolfocus: "CoolFocus",
 };
 
 export type ClientRow = {

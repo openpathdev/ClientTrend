@@ -23,6 +23,13 @@ const { title } = Astro.props;
 		<slot />
 
 		<div
+			id="cx-paste-preview"
+			class="fixed z-50 hidden w-[440px] max-w-[calc(100vw-16px)] rounded-lg border border-card-border bg-surface p-3 shadow-lg"
+			role="dialog"
+			aria-label="Paste from spreadsheet"
+		>
+		</div>
+		<div
 			id="cx-toast"
 			class="fixed bottom-4 right-4 z-50 hidden max-w-sm rounded-lg border border-needs-attention-line bg-needs-attention-tint px-4 py-2 text-[13px] text-needs-attention-text shadow-lg"
 			role="alert"
@@ -49,6 +56,58 @@ const { title } = Astro.props;
 						toast.classList.add("hidden");
 					}, 4000);
 				}
+				// Spreadsheet paste into the Performance / Paid Ads grids: pasting 2+ cells
+				// into a manual cell opens a preview (src/server/render/pastePreview.ts)
+				// instead of dropping the raw text into that one input. A single value
+				// still pastes into the input as normal.
+				var preview = document.getElementById("cx-paste-preview");
+				var pasteCellRect = null;
+				function hidePreview() {
+					preview.classList.add("hidden");
+				}
+				function placePreview() {
+					if (!pasteCellRect) return;
+					var width = preview.offsetWidth || 440;
+					var height = preview.offsetHeight || 120;
+					var left = Math.max(8, Math.min(pasteCellRect.left, window.innerWidth - width - 8));
+					var top = pasteCellRect.bottom + 4;
+					if (top + height > window.innerHeight - 8) top = Math.max(8, pasteCellRect.top - height - 4);
+					preview.style.left = left + "px";
+					preview.style.top = top + "px";
+				}
+				document.addEventListener("paste", function (event) {
+					var cell = event.target && event.target.closest ? event.target.closest("td[data-paste-url]") : null;
+					if (!cell) return;
+					var text = (event.clipboardData && event.clipboardData.getData("text/plain")) || "";
+					if (!/[\t\n]/.test(text.replace(/\r?\n$/, ""))) return;
+					event.preventDefault();
+					var section = cell.closest("section[data-month-count]");
+					pasteCellRect = cell.getBoundingClientRect();
+					if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+					preview.innerHTML = '<p class="text-[12px] text-muted">Reading pasted cells…</p>';
+					preview.classList.remove("hidden");
+					placePreview();
+					htmx.ajax("POST", cell.dataset.pasteUrl, {
+						target: preview,
+						swap: "innerHTML",
+						values: {
+							text: text,
+							metricId: cell.dataset.metricId,
+							month: cell.dataset.month,
+							months: section ? section.dataset.monthCount : "",
+						},
+					});
+				});
+				document.addEventListener("htmx:afterSwap", function (event) {
+					if (event.detail.target === preview) placePreview();
+				});
+				document.addEventListener("keydown", function (event) {
+					if (event.key === "Escape") hidePreview();
+				});
+				document.addEventListener("mousedown", function (event) {
+					if (!preview.classList.contains("hidden") && !preview.contains(event.target)) hidePreview();
+				});
+
 				document.addEventListener("htmx:responseError", function () {
 					show("Update failed — please try again.");
 				});

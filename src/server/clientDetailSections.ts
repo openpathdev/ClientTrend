@@ -35,6 +35,7 @@ export async function renderMonthlyDataSection(
 	statuses: Status[],
 	monthCount: number,
 	previousMonthCount?: number,
+	notice?: Parameters<typeof renderMonthlyDataTable>[0]["notice"],
 ): Promise<string> {
 	const months = trailingMonths(monthCount);
 	const [metrics, values, comments] = await Promise.all([
@@ -52,6 +53,7 @@ export async function renderMonthlyDataSection(
 		statuses,
 		comments,
 		previousMonthCount,
+		notice,
 	}).toString();
 }
 
@@ -61,6 +63,7 @@ export async function renderPaidAdsSection(
 	statuses: Status[],
 	monthCount: number,
 	previousMonthCount?: number,
+	notice?: Parameters<typeof renderMonthlyDataTable>[0]["notice"],
 ): Promise<string> {
 	const months = trailingMonths(monthCount);
 	const [metrics, values, comments] = await Promise.all([
@@ -79,5 +82,6 @@ export async function renderPaidAdsSection(
 		comments,
 		headerExtra: await renderPaidAdsSettings(client),
 		previousMonthCount,
+		notice,
 	}).toString();
 }

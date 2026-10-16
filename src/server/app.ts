@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { html } from "hono/html";
 import type { AppEnv } from "./bindings";
 import { createSupabaseClient } from "./supabase";
@@ -18,9 +18,10 @@ import {
 import { listChanges, createChange, updateChange, deleteChange } from "./data/changes";
 import { listLinks, createLink, updateLink, deleteLink } from "./data/links";
 import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
-import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus } from "./data/monthlyData";
+import { upsertMonthlyDataValue, getMonthlyDataValue, setMonthlyDataValueStatus, listMonthlyDataValues, bulkUpsertMonthlyDataValues } from "./data/monthlyData";
 import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
-import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus } from "./data/paidAdsData";
+import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus, listPaidAdsDataValues, bulkUpsertPaidAdsDataValues } from "./data/paidAdsData";
+import { createPasteImport, deletePasteImport, getPasteImport, markPasteImportUndone, type PasteChange } from "./data/pasteImports";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, runCatchupImport, tryAutoImportCompany } from "./syncHubspot";
 import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
@@ -39,8 +40,10 @@ import { renderCommentPopover } from "./render/commentPanel";
 import { renderMetricAdminPanel } from "./render/metricAdminPanel";
 import { renderPaidAdsSettings } from "./render/paidAdsSettings";
 import { renderMonthlyDataSection, renderPaidAdsSection } from "./clientDetailSections";
-import { DEFAULT_MONTH_WINDOW } from "./months";
-import { isValidLinkUrl, validateLength, parseMonthlyCellValue } from "./validation";
+import { DEFAULT_MONTH_WINDOW, trailingMonths } from "./months";
+import { isValidLinkUrl, isValidUuid, validateLength, parseMonthlyCellValue } from "./validation";
+import { PASTE_MAX_CHARS, cellsToWrite, displayText, isValidMonth, parseClipboardTable, planPaste } from "./pasteImport";
+import { renderPasteError, renderPasteNotice, renderPastePreview } from "./render/pastePreview";
 import {
 	CHANGE_CATEGORIES,
 	INTEGRATION_FLAGS,
@@ -458,6 +461,158 @@ app.patch("/api/clients/:id/paid-ads/:metricId/:month/highlight", async (c) => {
 	const cellComments = await listComments(supabase, clientId, "paid_ads", metricId, month);
 	return c.html(renderMetricCell(clientId, "paid_ads", metric, month, saved, bgClass, status, statuses, cellComments));
 });
+
+// ---- Spreadsheet paste into the Performance / Paid Ads grids (see pasteImport.ts) ----
+// The same three routes for both sections; only the catalog, value table and
+// section renderer differ.
+
+const PASTE_SECTIONS = [
+	{
+		path: "monthly-data",
+		section: "monthly_data",
+		listMetrics: listMonthlyMetrics,
+		listValues: listMonthlyDataValues,
+		bulkUpsert: bulkUpsertMonthlyDataValues,
+		renderSection: renderMonthlyDataSection,
+	},
+	{
+		path: "paid-ads",
+		section: "paid_ads",
+		listMetrics: listPaidAdsMetrics,
+		listValues: listPaidAdsDataValues,
+		bulkUpsert: bulkUpsertPaidAdsDataValues,
+		renderSection: renderPaidAdsSection,
+	},
+] as const;
+
+for (const config of PASTE_SECTIONS) {
+	/** Reads and re-plans a paste from the form body — shared by preview and commit, so both see exactly the same cells. */
+	async function loadPastePlan(c: Context<AppEnv>) {
+		const clientId = c.req.param("id") ?? "";
+		const body = await c.req.parseBody();
+		const text = typeof body.text === "string" ? body.text.replace(/^\n/, "") : "";
+		const metricId = typeof body.metricId === "string" ? body.metricId : "";
+		const month = typeof body.month === "string" ? body.month : "";
+		const monthCount = readMonthCount(typeof body.months === "string" ? body.months : undefined);
+
+		if (!isValidUuid(clientId) || !isValidUuid(metricId) || !isValidMonth(month)) return { ok: false, error: "That cell can't be pasted into." } as const;
+		if (text.length > PASTE_MAX_CHARS) return { ok: false, error: "That's too much to paste at once. Copy a smaller block of cells." } as const;
+
+		const supabase = createSupabaseClient(c.env);
+		const metrics = await config.listMetrics(supabase);
+		const metric = metrics.find((m) => m.id === metricId);
+		if (!metric) return { ok: false, error: "That row no longer exists. Reload the page and try again." } as const;
+		if (metric.source === "hubspot") return { ok: false, error: "This row is filled automatically from HubSpot and can't be pasted into." } as const;
+
+		const grid = parseClipboardTable(text);
+		const currentMonth = trailingMonths(1)[0];
+		// Existing values from the start month up to now — later months are skipped by planPaste anyway.
+		const existing = await config.listValues(supabase, clientId, month, month > currentMonth ? month : currentMonth);
+		const plan = planPaste({ grid, startMetricId: metricId, startMonth: month, metrics, existing, currentMonth });
+		return { ok: true, supabase, clientId, text, metricId, month, monthCount, plan, existing } as const;
+	}
+
+	app.post(`/api/clients/:id/${config.path}/paste/preview`, async (c) => {
+		const loaded = await loadPastePlan(c);
+		if (!loaded.ok) return c.html(renderPasteError(loaded.error));
+		const { clientId, text, metricId, month, monthCount, plan } = loaded;
+		return c.html(renderPastePreview({ clientId, section: config.section, sectionPath: config.path, plan, text, metricId, month, monthCount }));
+	});
+
+	app.post(`/api/clients/:id/${config.path}/paste/commit`, async (c) => {
+		const loaded = await loadPastePlan(c);
+		if (!loaded.ok) return c.text(loaded.error, 400);
+		const { supabase, clientId, monthCount, plan, existing } = loaded;
+		const client = await getClientById(supabase, clientId);
+		if (!client) return c.text("Client not found", 404);
+		const statuses = await listStatuses(supabase);
+		const writes = cellsToWrite(plan);
+		if (writes.length === 0) {
+			const notice = renderPasteNotice({ message: "Nothing to save — those cells already match.", tone: "watch", section: config.section, monthCount });
+			return c.html(await config.renderSection(supabase, client, statuses, monthCount, undefined, notice));
+		}
+
+		const userEmail = c.get("userEmail");
+		const existingByKey = new Map(existing.map((v) => [`${v.metricId}|${v.month}`, v]));
+		const changes: PasteChange[] = writes.map(({ metric, cell }) => {
+			const old = existingByKey.get(`${metric.id}|${cell.month}`);
+			return {
+				metric_id: metric.id,
+				month: cell.month,
+				old_value: old?.value ?? null,
+				old_value_text: old?.valueText ?? null,
+				old_updated_by: old?.updatedBy ?? null,
+				new_value: cell.value,
+				new_value_text: cell.valueText,
+			};
+		});
+
+		const importId = await createPasteImport(supabase, { clientId, section: config.section, changes, createdBy: userEmail });
+		try {
+			await config.bulkUpsert(
+				supabase,
+				changes.map((ch) => ({ clientId, metricId: ch.metric_id, month: ch.month, value: ch.new_value, valueText: ch.new_value_text, updatedBy: userEmail })),
+			);
+		} catch (err) {
+			await deletePasteImport(supabase, importId);
+			throw err;
+		}
+
+		const rowCount = new Set(changes.map((ch) => ch.metric_id)).size;
+		const notice = renderPasteNotice({
+			message: `Saved ${String(changes.length)} pasted value${changes.length === 1 ? "" : "s"}${rowCount > 1 ? ` across ${String(rowCount)} rows` : ""}.`,
+			tone: "healthy",
+			undoUrl: `/api/clients/${clientId}/${config.path}/paste/${importId}/undo`,
+			section: config.section,
+			monthCount,
+		});
+		return c.html(await config.renderSection(supabase, client, statuses, monthCount, undefined, notice));
+	});
+
+	/**
+	 * Puts back each pasted cell's previous value — but only cells still
+	 * holding what the paste wrote, so anything edited by hand since is kept.
+	 * Cells that were empty before the paste are emptied again, not deleted,
+	 * so a highlight added since survives.
+	 */
+	app.post(`/api/clients/:id/${config.path}/paste/:importId/undo`, async (c) => {
+		const supabase = createSupabaseClient(c.env);
+		const clientId = c.req.param("id");
+		const importId = c.req.param("importId");
+		if (!isValidUuid(clientId) || !isValidUuid(importId)) return c.text("Not found", 404);
+		const body = await c.req.parseBody();
+		const monthCount = readMonthCount(typeof body.months === "string" ? body.months : undefined);
+
+		const [client, record, statuses] = await Promise.all([getClientById(supabase, clientId), getPasteImport(supabase, importId), listStatuses(supabase)]);
+		if (!client || !record || record.clientId !== clientId || record.section !== config.section) return c.text("Not found", 404);
+		const userEmail = c.get("userEmail");
+		if (record.undoneAt || !(await markPasteImportUndone(supabase, importId, userEmail))) {
+			const notice = renderPasteNotice({ message: "That paste was already undone.", tone: "watch", section: config.section, monthCount });
+			return c.html(await config.renderSection(supabase, client, statuses, monthCount, undefined, notice));
+		}
+
+		const months = record.changes.map((ch) => ch.month).sort();
+		const current = await config.listValues(supabase, clientId, months[0], months[months.length - 1]);
+		const currentByKey = new Map(current.map((v) => [`${v.metricId}|${v.month}`, v]));
+		const revert = record.changes.filter((ch) => {
+			const now = currentByKey.get(`${ch.metric_id}|${ch.month}`);
+			return displayText(now) === displayText({ value: ch.new_value, valueText: ch.new_value_text });
+		});
+		await config.bulkUpsert(
+			supabase,
+			revert.map((ch) => ({ clientId, metricId: ch.metric_id, month: ch.month, value: ch.old_value, valueText: ch.old_value_text, updatedBy: ch.old_updated_by ?? userEmail })),
+		);
+
+		const kept = record.changes.length - revert.length;
+		const notice = renderPasteNotice({
+			message: `Paste undone — ${String(revert.length)} value${revert.length === 1 ? "" : "s"} restored${kept > 0 ? `, ${String(kept)} left as is because ${kept === 1 ? "it was" : "they were"} edited since` : ""}.`,
+			tone: kept > 0 ? "watch" : "healthy",
+			section: config.section,
+			monthCount,
+		});
+		return c.html(await config.renderSection(supabase, client, statuses, monthCount, undefined, notice));
+	});
+}
 
 /**
  * Go-live date + ad spend/mo — simple manually-entered client fields, not

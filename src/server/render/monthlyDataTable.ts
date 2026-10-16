@@ -252,12 +252,15 @@ export function renderMetricCell(
 		class="group relative whitespace-nowrap p-1 text-right ${bgClass}"
 		style="${highlightStyle}"
 		x-data="{ editing: false }"
+		data-paste-url="/api/clients/${clientId}/${sectionBasePath(section)}/paste/preview"
+		data-metric-id="${metric.id}"
+		data-month="${month}"
 	>
 		${renderCellMarker(clientId, section, metric, month, status, statuses, cellComments)}
 		<button
 			type="button"
 			x-show="!editing"
-			x-on:click="editing = true"
+			x-on:click="editing = true; $nextTick(() => $refs.input.focus())"
 			class="w-full min-w-[72px] rounded px-2 py-1 text-right font-mono text-[14px] text-ink hover:bg-zebra-row"
 		>
 			${rawValue === "" ? "—" : rawValue}
@@ -266,7 +269,8 @@ export function renderMetricCell(
 			x-show="editing"
 			x-cloak
 			x-on:blur="editing = false"
-			x-on:keydown.escape="editing = false; $el.value = '${rawValue}'"
+			x-ref="input"
+			x-on:keydown.escape="editing = false; $el.value = $el.defaultValue"
 			type="text"
 			name="value"
 			value="${rawValue}"
@@ -313,8 +317,10 @@ export function renderMonthlyDataTable(params: {
 	 * the load is visibly confirmed (PRD §10, "load earlier months" gap).
 	 */
 	previousMonthCount?: number;
+	/** Banner under the header after a spreadsheet paste is saved or undone (see renderPasteNotice). */
+	notice?: ReturnType<typeof html>;
 }) {
-	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra, previousMonthCount } = params;
+	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra, previousMonthCount, notice } = params;
 	const byKey = new Map(values.map((v) => [cellKey(v.metricId, v.month), v]));
 	const statusesById = new Map(statuses.map((s) => [s.id, s]));
 	const scrollInit =
@@ -322,7 +328,7 @@ export function renderMonthlyDataTable(params: {
 			? `$el.scrollLeft = $el.scrollWidth * ${(previousMonthCount / months.length).toFixed(4)} - $el.clientWidth / 2`
 			: "$el.scrollLeft = $el.scrollWidth";
 
-	return html`<section id="${section}-section" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
+	return html`<section id="${section}-section" data-month-count="${String(months.length)}" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-3">
 				<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>
@@ -341,6 +347,7 @@ export function renderMonthlyDataTable(params: {
 				<span class="font-mono text-[11px] text-muted">Last ${String(months.length)} months</span>
 			</div>
 		</div>
+		${notice ?? ""}
 
 		<div class="mt-3 overflow-x-auto rounded-lg border border-section-rule" x-data x-init="${scrollInit}">
 			<table class="w-full border-collapse">

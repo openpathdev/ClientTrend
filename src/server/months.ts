@@ -22,6 +22,12 @@ export function trailingMonths(count: number, endingBefore?: string): string[] {
 	return months;
 }
 
+/** `month` (YYYY-MM-01) shifted by `count` months, e.g. addMonths("2025-12-01", 1) → "2026-01-01". */
+export function addMonths(month: string, count: number): string {
+	const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + count, 1));
+	return firstOfMonth(d.getUTCFullYear(), d.getUTCMonth());
+}
+
 /** Table column header, e.g. "SEP '26" — the 2-digit year disambiguates the same month across a year boundary in the trailing window. */
 export function monthLabel(month: string): string {
 	const d = new Date(`${month}T00:00:00Z`);

@@ -93,6 +93,30 @@ export async function upsertMonthlyDataValue(
 	return mapValue(data as ValueRow);
 }
 
+/**
+ * Writes many cells in one request (Performance spreadsheet paste and its undo).
+ * Only the value columns and updated_by are sent, so each cell's highlight
+ * (status_id) is left as it is.
+ */
+export async function bulkUpsertMonthlyDataValues(
+	supabase: SupabaseClient,
+	rows: { clientId: string; metricId: string; month: string; value: number | null; valueText: string | null; updatedBy: string }[],
+): Promise<void> {
+	if (rows.length === 0) return;
+	const { error } = await supabase.from("monthly_data_values").upsert(
+		rows.map((r) => ({
+			client_id: r.clientId,
+			metric_id: r.metricId,
+			month: r.month,
+			value: r.value,
+			value_text: r.valueText,
+			updated_by: r.updatedBy,
+		})),
+		{ onConflict: "client_id,metric_id,month" },
+	);
+	if (error) throw new Error(error.message);
+}
+
 /** Sets (or clears, with statusId=null) a cell's highlight only — value/value_text/updated_by are left untouched. */
 export async function setMonthlyDataValueStatus(
 	supabase: SupabaseClient,

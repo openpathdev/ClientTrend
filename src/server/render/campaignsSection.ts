@@ -37,7 +37,6 @@ export function renderCampaignsOff(clientId: string, monthCount: number) {
 		<div class="flex items-center gap-3">
 			<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">Campaigns</h2>
 			${renderCampaignsToggle(clientId, false, monthCount)}
-			<span class="text-[12px] text-muted">Turn on to track extra ad campaigns.</span>
 		</div>
 	</section>`;
 }

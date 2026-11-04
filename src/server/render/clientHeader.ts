@@ -109,10 +109,20 @@ function renderBaselineGoal(
 	</div>`;
 }
 
+/** HX-Trigger event sent when an edit elsewhere on the page (e.g. the AM/AD Performance row) changed the client's status automatically. */
+export const CLIENT_STATUS_CHANGED_EVENT = "client-status-changed";
+
 export function renderClientHeader(client: ClientRow, statuses: Status[]) {
 	const site = websiteHref(client.website);
 
 	return html`<div id="client-header" class="rounded-2xl border border-card-border bg-surface p-6 shadow-sm">
+		<div
+			hidden
+			hx-get="/api/clients/${client.id}/header"
+			hx-trigger="${CLIENT_STATUS_CHANGED_EVENT} from:body"
+			hx-target="#client-header"
+			hx-swap="outerHTML"
+		></div>
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex items-start gap-4">
 				<div class="relative" x-data="{ open: false }">

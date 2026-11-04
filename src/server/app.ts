@@ -16,6 +16,8 @@ import {
 	updateClientIntegrationFlag,
 	getClientById,
 } from "./data/clients";
+import { applyAmadStatusRule, applyAmadStatusRuleToAll } from "./data/amadStatus";
+import { AMAD_RULE_METRIC_KEY } from "./amadStatusRule";
 import { listChanges, createChange, updateChange, deleteChange } from "./data/changes";
 import { listLinks, createLink, updateLink, deleteLink } from "./data/links";
 import { listMonthlyMetrics, createMonthlyMetric } from "./data/monthlyMetrics";
@@ -47,7 +49,7 @@ import { listCsmsWithOwnerId } from "./data/csms";
 import { renderHubspotResults, renderImportedRow } from "./render/hubspotImportPanel";
 import { renderOverviewPanel } from "./render/overviewPanel";
 import { renderClientCard } from "./render/card";
-import { renderClientHeader } from "./render/clientHeader";
+import { renderClientHeader, CLIENT_STATUS_CHANGED_EVENT } from "./render/clientHeader";
 import { renderNotesSection } from "./render/notesSection";
 import { renderChangesSection } from "./render/changesSection";
 import { renderLinksSection } from "./render/linksSection";
@@ -152,6 +154,16 @@ app.patch("/api/clients/:id/status", async (c) => {
 	return c.html(view === "header" ? renderClientHeader(updated, statuses) : renderClientCard(updated, statuses));
 });
 
+/** Client header on its own — re-fetched by the header when a Performance edit changes the status automatically (CLIENT_STATUS_CHANGED_EVENT). */
+app.get("/api/clients/:id/header", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	if (!isValidUuid(clientId)) return c.text("Not found", 404);
+	const [client, statuses] = await Promise.all([getClientById(supabase, clientId), listStatuses(supabase)]);
+	if (!client) return c.text("Client not found", 404);
+	return c.html(renderClientHeader(client, statuses));
+});
+
 /** Clears hubspot_company_id so a bad match can be corrected without deleting the client (PRD §14). */
 app.post("/api/clients/:id/hubspot-unlink", async (c) => {
 	const supabase = createSupabaseClient(c.env);
@@ -193,10 +205,11 @@ app.patch("/api/clients/:id/baselines", async (c) => {
 	const baselineAmad = parseBaseline(body.baselineAmad);
 	if (baselineClients === undefined || baselineAmad === undefined) return c.text("Baselines must be whole numbers", 400);
 
-	const [updated, statuses] = await Promise.all([
-		updateClientBaselines(supabase, clientId, { baselineClients, baselineAmad }),
-		listStatuses(supabase),
-	]);
+	const saved = await updateClientBaselines(supabase, clientId, { baselineClients, baselineAmad });
+	if (!saved) return c.text("Client not found", 404);
+	// A new AM/AD baseline can change the automatic status (amadStatusRule.ts).
+	const statusChanged = await applyAmadStatusRule(supabase, clientId);
+	const [updated, statuses] = await Promise.all([statusChanged ? getClientById(supabase, clientId) : saved, listStatuses(supabase)]);
 	if (!updated) return c.text("Client not found", 404);
 	return c.html(renderClientHeader(updated, statuses));
 });
@@ -372,6 +385,9 @@ app.put("/api/clients/:id/monthly-data/:metricId/:month", async (c) => {
 		valueText: parsed.valueText,
 		updatedBy,
 	});
+	if (metric.key === AMAD_RULE_METRIC_KEY && (await applyAmadStatusRule(supabase, clientId))) {
+		c.header("HX-Trigger", CLIENT_STATUS_CHANGED_EVENT);
+	}
 
 	const status = saved.statusId ? (statuses.find((s) => s.id === saved.statusId) ?? null) : null;
 	const cellComments = await listComments(supabase, clientId, "monthly_data", metricId, month);
@@ -509,6 +525,12 @@ const PASTE_SECTIONS = [
 	},
 ] as const;
 
+/** A Performance paste (or its undo) may have touched the AM/AD row the automatic status reads. */
+async function reapplyAmadRuleAfterPaste(c: Context<AppEnv>, section: string, clientId: string) {
+	if (section !== "monthly_data") return;
+	if (await applyAmadStatusRule(createSupabaseClient(c.env), clientId)) c.header("HX-Trigger", CLIENT_STATUS_CHANGED_EVENT);
+}
+
 for (const config of PASTE_SECTIONS) {
 	/** Reads and re-plans a paste from the form body — shared by preview and commit, so both see exactly the same cells. */
 	async function loadPastePlan(c: Context<AppEnv>) {
@@ -581,6 +603,7 @@ for (const config of PASTE_SECTIONS) {
 			await deletePasteImport(supabase, importId);
 			throw err;
 		}
+		await reapplyAmadRuleAfterPaste(c, config.section, clientId);
 
 		const rowCount = new Set(changes.map((ch) => ch.metric_id)).size;
 		const notice = renderPasteNotice({
@@ -632,6 +655,7 @@ for (const config of PASTE_SECTIONS) {
 			supabase,
 			revert.map((ch) => ({ clientId, metricId: ch.metric_id, month: ch.month, value: ch.old_value, valueText: ch.old_value_text, updatedBy: ch.old_updated_by ?? userEmail })),
 		);
+		await reapplyAmadRuleAfterPaste(c, config.section, clientId);
 
 		const kept = record.changes.length - revert.length;
 		const notice = renderPasteNotice({
@@ -1082,6 +1106,16 @@ app.post("/api/admin/hubspot-sync/run", async (c) => {
 	const cursorParam = c.req.query("cursor");
 	const cursor = cursorParam !== undefined ? Number(cursorParam) : undefined;
 	const runId = c.req.query("runId") ?? undefined;
+	if (cursor === undefined && runId === undefined) {
+		// Daily re-check of the automatic AM/AD status — picks up a month
+		// rolling over. Never allowed to block the HubSpot sync itself.
+		try {
+			const outcome = await applyAmadStatusRuleToAll(createSupabaseClient(c.env));
+			console.log(`AM/AD status rule: checked ${String(outcome.checked)} clients, changed ${String(outcome.changed)}`);
+		} catch (err) {
+			console.error("AM/AD status rule failed", err);
+		}
+	}
 	const result =
 		c.req.query("phase") === "catchup" && runId
 			? await runCatchupImport(c.env, runId, c.req.query("after") ?? undefined)

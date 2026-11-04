@@ -42,6 +42,8 @@ import { renderCampaignName } from "./render/campaignsSection";
 import { createPasteImport, deletePasteImport, getPasteImport, markPasteImportUndone, type PasteChange } from "./data/pasteImports";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, runCatchupImport, tryAutoImportCompany } from "./syncHubspot";
+import { createSyncRun, getLatestSyncRun, getSyncRun, listSyncRunProblemClients } from "./data/hubspotSyncLog";
+import { renderHubspotSyncStatus, isRunActive, HUBSPOT_SYNC_FINISHED_EVENT } from "./render/hubspotSyncStatus";
 import { verifyHubspotWebhookSignature } from "./hubspotWebhookAuth";
 import { searchEligibleCompanies, fetchCompanySyncProperties, fetchSubscriptionEligibility, normalizeHubspotText, parseHubspotInteger, resolveStateCode } from "./hubspot";
 import { listImportedHubspotCompanyIds, createClientFromHubspot, unlinkHubspotClient } from "./data/clients";
@@ -1105,38 +1107,52 @@ app.post("/api/admin/hubspot-companies/:hubspotCompanyId/import", async (c) => {
 app.post("/api/admin/hubspot-sync/run", async (c) => {
 	const cursorParam = c.req.query("cursor");
 	const cursor = cursorParam !== undefined ? Number(cursorParam) : undefined;
-	const runId = c.req.query("runId") ?? undefined;
-	if (cursor === undefined && runId === undefined) {
-		// Daily re-check of the automatic AM/AD status — picks up a month
-		// rolling over. Never allowed to block the HubSpot sync itself.
-		try {
-			const outcome = await applyAmadStatusRuleToAll(createSupabaseClient(c.env));
-			console.log(`AM/AD status rule: checked ${String(outcome.checked)} clients, changed ${String(outcome.changed)}`);
-		} catch (err) {
-			console.error("AM/AD status rule failed", err);
-		}
-	}
-	const result =
-		c.req.query("phase") === "catchup" && runId
-			? await runCatchupImport(c.env, runId, c.req.query("after") ?? undefined)
-			: await runHubspotSync(c.env, { cursor, runId });
+	const phase = c.req.query("phase");
+	let runId = c.req.query("runId") ?? undefined;
 
-	if (result.status === "more") {
+	/** Fires the next step of this run as its own invocation (fresh subrequest budget). */
+	const chainNext = (params: Record<string, string>) => {
 		const nextUrl = new URL(c.req.url);
-		nextUrl.search = "";
-		nextUrl.searchParams.set("runId", result.runId);
-		if (result.nextPhase === "catchup") {
-			nextUrl.searchParams.set("phase", "catchup");
-			if (result.nextAfter) nextUrl.searchParams.set("after", result.nextAfter);
-		} else {
-			nextUrl.searchParams.set("cursor", String(result.nextCursor));
-		}
+		nextUrl.search = new URLSearchParams(params).toString();
 		c.executionCtx.waitUntil(
 			fetch(nextUrl.toString(), {
 				method: "POST",
 				headers: { "X-Sync-Secret": c.env.HUBSPOT_SYNC_SECRET, Origin: nextUrl.origin },
 			}),
 		);
+	};
+
+	// Step 0 — the daily AM/AD status re-check (amadStatusRule.ts), which
+	// picks up a month rolling over. A bare call (the cron) starts here; the
+	// Sync HubSpot button creates the run first and passes phase=amad. Runs
+	// in its own invocation(s) so its writes never eat the HubSpot batches'
+	// subrequest budget, and a failure here never blocks the HubSpot sync.
+	if (phase === "amad" || (phase === undefined && cursor === undefined && runId === undefined)) {
+		runId ??= await createSyncRun(createSupabaseClient(c.env));
+		const pass = Number(c.req.query("pass") ?? "1");
+		let more = false;
+		try {
+			const outcome = await applyAmadStatusRuleToAll(createSupabaseClient(c.env));
+			more = outcome.more && pass < 10;
+			console.log(`AM/AD status rule pass ${String(pass)}: checked ${String(outcome.checked)} clients, changed ${String(outcome.changed)}${outcome.more ? ", more to do" : ""}`);
+		} catch (err) {
+			console.error("AM/AD status rule failed", err);
+		}
+		chainNext(more ? { runId, phase: "amad", pass: String(pass + 1) } : { runId });
+		return c.json({ runId, status: "more", phase: "amad" });
+	}
+
+	const result =
+		phase === "catchup" && runId
+			? await runCatchupImport(c.env, runId, c.req.query("after") ?? undefined)
+			: await runHubspotSync(c.env, { cursor, runId });
+
+	if (result.status === "more") {
+		if (result.nextPhase === "catchup") {
+			chainNext({ runId: result.runId, phase: "catchup", ...(result.nextAfter ? { after: result.nextAfter } : {}) });
+		} else {
+			chainNext({ runId: result.runId, cursor: String(result.nextCursor) });
+		}
 	}
 
 	return c.json(result);
@@ -1151,17 +1167,46 @@ app.post("/api/admin/hubspot-sync/run", async (c) => {
  * isn't blocked on the full multi-batch sync, which can take a minute-plus.
  */
 app.post("/api/admin/hubspot-sync/trigger", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	// A sync already in progress (nightly cron or another user's click): follow that one instead of starting a second.
+	const latest = await getLatestSyncRun(supabase);
+	if (latest && isRunActive(latest, new Date())) return c.html(renderHubspotSyncStatus({ run: latest }));
+
+	// The run is created here, not in /run, so the page can follow it by id.
+	const runId = await createSyncRun(supabase);
 	// Not `c.req.url`: users browse via the Access-protected custom domain, and
 	// Access redirects this server-to-server call to its login page, so /run was
 	// never reached. workers.dev isn't behind Access (the shared secret guards /run).
 	const runUrl = new URL("/api/admin/hubspot-sync/run", c.env.HUBSPOT_SYNC_BASE_URL);
+	runUrl.search = new URLSearchParams({ runId, phase: "amad" }).toString();
 	c.executionCtx.waitUntil(
 		fetch(runUrl.toString(), {
 			method: "POST",
 			headers: { "X-Sync-Secret": c.env.HUBSPOT_SYNC_SECRET, Origin: runUrl.origin },
 		}),
 	);
-	return c.html(html`<span class="text-[12px] text-muted">Sync started — running in the background.</span>`);
+	const run = await getSyncRun(supabase, runId);
+	return c.html(renderHubspotSyncStatus({ run }));
+});
+
+/**
+ * Progress/result message next to the Sync HubSpot button. `runId` follows
+ * one run (the button's, or one already running at page load); without it,
+ * the latest run. `live=1` means the page watched the run, so a finish is
+ * announced ("Sync finished — …") and the Overview grid is told to reload.
+ */
+app.get("/api/admin/hubspot-sync/status", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const runId = c.req.query("runId");
+	if (runId !== undefined && !isValidUuid(runId)) return c.text("Not found", 404);
+	const run = runId ? await getSyncRun(supabase, runId) : await getLatestSyncRun(supabase);
+	const live = c.req.query("live") === "1";
+	const now = new Date();
+	if (!run || isRunActive(run, now)) return c.html(renderHubspotSyncStatus({ run, now }));
+
+	const problemClients = run.clientsFailed > 0 ? await listSyncRunProblemClients(supabase, run.id) : [];
+	if (live) c.header("HX-Trigger", HUBSPOT_SYNC_FINISHED_EVENT);
+	return c.html(renderHubspotSyncStatus({ run, problemClients, live, now }));
 });
 
 type HubspotWebhookEvent = {

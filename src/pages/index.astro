@@ -9,6 +9,8 @@ import { listCsms } from "../server/data/csms";
 import { listStates } from "../server/data/states";
 import { listClients } from "../server/data/clients";
 import { renderOverviewPanel } from "../server/render/overviewPanel";
+import { getLatestSyncRun, listSyncRunProblemClients } from "../server/data/hubspotSyncLog";
+import { renderHubspotSyncStatus, isRunActive, HUBSPOT_SYNC_FINISHED_EVENT } from "../server/render/hubspotSyncStatus";
 import type { ClientFilters } from "../server/data/types";
 
 const url = new URL(Astro.request.url);
@@ -19,12 +21,17 @@ const filters: ClientFilters = {
 };
 
 const supabase = createSupabaseClient(env);
-const [statuses, csms, states, clients] = await Promise.all([
+const [statuses, csms, states, clients, latestSync] = await Promise.all([
 	listStatuses(supabase),
 	listCsms(supabase),
 	listStates(supabase),
 	listClients(supabase, filters),
+	getLatestSyncRun(supabase),
 ]);
+// "Last synced …" (or live progress, if a sync is running right now) next to the Sync HubSpot button.
+const syncProblems =
+	latestSync && latestSync.clientsFailed > 0 && !isRunActive(latestSync, new Date()) ? await listSyncRunProblemClients(supabase, latestSync.id) : [];
+const syncStatusHtml = (await renderHubspotSyncStatus({ run: latestSync, problemClients: syncProblems })).toString();
 
 const panelHtml = (await renderOverviewPanel({ clients, statuses, csms, states, filters })).toString();
 const accountCount = clients.length;
@@ -38,12 +45,21 @@ const accountCount = clients.length;
 				<p class="mt-1 font-mono text-[13px] text-muted">{accountCount} account{accountCount === 1 ? "" : "s"}</p>
 			</div>
 			<div class="flex shrink-0 items-center gap-3">
-				<span id="hubspot-sync-status" class="text-[12px] text-muted"></span>
+				<Fragment set:html={syncStatusHtml} />
+				{/* When a sync this page is watching finishes, reload the card grid with whatever filters are in the URL now. */}
+				<div
+					hidden
+					hx-get="/partials/clients"
+					hx-vals="js:{...Object.fromEntries(new URLSearchParams(location.search))}"
+					hx-trigger={`${HUBSPOT_SYNC_FINISHED_EVENT} from:body`}
+					hx-target="#overview-panel"
+					hx-swap="outerHTML"
+				></div>
 				<button
 					type="button"
 					hx-post="/api/admin/hubspot-sync/trigger"
 					hx-target="#hubspot-sync-status"
-					hx-swap="innerHTML"
+					hx-swap="outerHTML"
 					hx-indicator="#hubspot-sync-loading"
 					class="relative flex items-center justify-center rounded-md border border-card-border bg-surface px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-zebra-row"
 				>

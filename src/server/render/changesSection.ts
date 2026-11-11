@@ -1,5 +1,29 @@
 import { html } from "hono/html";
-import type { Change } from "../data/types";
+import type { Change, ChangeKind } from "../data/types";
+
+/**
+ * Per-kind wiring: the general "List of changes" and the Ad Changes list
+ * under Paid Ads share this renderer, differing only in DOM id, API path
+ * and copy.
+ */
+const KIND_CONFIG: Record<ChangeKind, { sectionId: string; apiPath: string; title: string; logLabel: string; emptyText: string; placeholder: string }> = {
+	general: {
+		sectionId: "changes-section",
+		apiPath: "changes",
+		title: "List of changes",
+		logLabel: "Log a change",
+		emptyText: "No changes logged yet.",
+		placeholder: "What changed?",
+	},
+	ad: {
+		sectionId: "ad-changes-section",
+		apiPath: "ad-changes",
+		title: "Ad Changes",
+		logLabel: "Log an ad change",
+		emptyText: "No ad changes logged yet.",
+		placeholder: "What changed in the ads?",
+	},
+};
 
 /** `change.changeDate` is stored as ISO (YYYY-MM-DD); displayed as MM/DD/YYYY per user preference. */
 function formatDate(iso: string): string {
@@ -13,7 +37,8 @@ function formatDate(iso: string): string {
  * (kept for PRD §13 CRUD requirements) but only surface on hover/focus so
  * the default view stays as clean as the reference.
  */
-function renderChangeItem(clientId: string, change: Change) {
+function renderChangeItem(clientId: string, change: Change, kind: ChangeKind) {
+	const { sectionId, apiPath } = KIND_CONFIG[kind];
 	return html`<div x-data="{ editing: false, confirming: false }" class="group border-b border-row-rule py-2.5 last:border-b-0">
 		<div x-show="!editing" class="flex items-start gap-3">
 			<span class="w-20 shrink-0 pt-0.5 font-mono text-[12px] text-muted">${formatDate(change.changeDate)}</span>
@@ -27,8 +52,8 @@ function renderChangeItem(clientId: string, change: Change) {
 				<span x-show="confirming" x-cloak class="flex items-center gap-1.5 whitespace-nowrap">
 					<button
 						type="button"
-						hx-delete="/api/clients/${clientId}/changes/${change.id}"
-						hx-target="#changes-section"
+						hx-delete="/api/clients/${clientId}/${apiPath}/${change.id}"
+						hx-target="#${sectionId}"
 						hx-swap="outerHTML"
 						class="font-medium text-needs-attention-text hover:underline"
 					>
@@ -40,8 +65,8 @@ function renderChangeItem(clientId: string, change: Change) {
 		</div>
 		<form
 			x-show="editing"
-			hx-patch="/api/clients/${clientId}/changes/${change.id}"
-			hx-target="#changes-section"
+			hx-patch="/api/clients/${clientId}/${apiPath}/${change.id}"
+			hx-target="#${sectionId}"
 			hx-swap="outerHTML"
 			class="flex flex-col gap-2 py-1"
 		>
@@ -70,16 +95,17 @@ ${change.description}</textarea
 	</div>`;
 }
 
-export function renderChangesSection(clientId: string, changes: Change[], error?: string) {
+export function renderChangesSection(clientId: string, changes: Change[], error?: string, kind: ChangeKind = "general") {
+	const { sectionId, apiPath, title, logLabel, emptyText, placeholder } = KIND_CONFIG[kind];
 	const today = new Date().toISOString().slice(0, 10);
-	return html`<section id="changes-section" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
-		<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">List of changes</h2>
+	return html`<section id="${sectionId}" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
+		<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>
 
 		<details class="mt-3">
-			<summary class="cursor-pointer text-[12.5px] font-medium text-link hover:underline">Log a change</summary>
+			<summary class="cursor-pointer text-[12.5px] font-medium text-link hover:underline">${logLabel}</summary>
 			<form
-				hx-post="/api/clients/${clientId}/changes"
-				hx-target="#changes-section"
+				hx-post="/api/clients/${clientId}/${apiPath}"
+				hx-target="#${sectionId}"
 				hx-swap="outerHTML"
 				class="mt-2 flex flex-col gap-2"
 			>
@@ -97,7 +123,7 @@ export function renderChangesSection(clientId: string, changes: Change[], error?
 					rows="2"
 					required
 					aria-label="Change description"
-					placeholder="What changed?"
+					placeholder="${placeholder}"
 					class="w-full rounded-md border border-card-border px-2 py-1.5 text-[13.5px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
 				></textarea>
 				<button
@@ -112,8 +138,8 @@ export function renderChangesSection(clientId: string, changes: Change[], error?
 		<div class="mt-3">
 			${
 				changes.length > 0
-					? changes.map((change) => renderChangeItem(clientId, change))
-					: html`<p class="text-[13px] text-muted">No changes logged yet.</p>`
+					? changes.map((change) => renderChangeItem(clientId, change, kind))
+					: html`<p class="text-[13px] text-muted">${emptyText}</p>`
 			}
 		</div>
 	</section>`;

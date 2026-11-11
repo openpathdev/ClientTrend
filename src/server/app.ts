@@ -68,6 +68,7 @@ import {
 	CHANGE_CATEGORIES,
 	INTEGRATION_FLAGS,
 	type ChangeCategory,
+	type ChangeKind,
 	type ClientFilters,
 	type CommentSection,
 	type IntegrationFlag,
@@ -245,50 +246,54 @@ function readChangeCategory(value: unknown): ChangeCategory | null {
 	return null;
 }
 
-app.post("/api/clients/:id/changes", async (c) => {
-	const supabase = createSupabaseClient(c.env);
-	const clientId = c.req.param("id");
-	const client = await getClientById(supabase, clientId);
-	if (!client) return c.text("Client not found", 404);
+// Same CRUD for the general list (`/changes`) and the Ad Changes list under Paid Ads (`/ad-changes`).
+for (const [kind, path] of [
+	["general", "changes"],
+	["ad", "ad-changes"],
+] as const satisfies readonly (readonly [ChangeKind, string])[]) {
+	app.post(`/api/clients/:id/${path}`, async (c) => {
+		const supabase = createSupabaseClient(c.env);
+		const clientId = c.req.param("id");
+		const client = await getClientById(supabase, clientId);
+		if (!client) return c.text("Client not found", 404);
 
-	const body = await c.req.parseBody();
-	const changeDate = typeof body.changeDate === "string" ? body.changeDate : "";
-	const description = typeof body.description === "string" ? body.description : "";
-	const category = readChangeCategory(body.category);
-	const changes = await listChanges(supabase, clientId);
+		const body = await c.req.parseBody();
+		const changeDate = typeof body.changeDate === "string" ? body.changeDate : "";
+		const description = typeof body.description === "string" ? body.description : "";
+		const category = readChangeCategory(body.category);
 
-	if (!changeDate || !validateLength(description, 1, 5000)) {
-		return c.html(renderChangesSection(clientId, changes, "Date and description are required."), 400);
-	}
+		if (!changeDate || !validateLength(description, 1, 5000)) {
+			return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId, kind), "Date and description are required.", kind), 400);
+		}
 
-	await createChange(supabase, clientId, { changeDate, description: description.trim(), category }, c.get("userEmail"));
-	return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId)));
-});
+		await createChange(supabase, clientId, { changeDate, description: description.trim(), category }, c.get("userEmail"), kind);
+		return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId, kind), undefined, kind));
+	});
 
-app.patch("/api/clients/:id/changes/:changeId", async (c) => {
-	const supabase = createSupabaseClient(c.env);
-	const clientId = c.req.param("id");
-	const changeId = c.req.param("changeId");
-	const body = await c.req.parseBody();
-	const changeDate = typeof body.changeDate === "string" ? body.changeDate : "";
-	const description = typeof body.description === "string" ? body.description : "";
-	const category = readChangeCategory(body.category);
-	const changes = await listChanges(supabase, clientId);
+	app.patch(`/api/clients/:id/${path}/:changeId`, async (c) => {
+		const supabase = createSupabaseClient(c.env);
+		const clientId = c.req.param("id");
+		const changeId = c.req.param("changeId");
+		const body = await c.req.parseBody();
+		const changeDate = typeof body.changeDate === "string" ? body.changeDate : "";
+		const description = typeof body.description === "string" ? body.description : "";
+		const category = readChangeCategory(body.category);
 
-	if (!changeDate || !validateLength(description, 1, 5000)) {
-		return c.html(renderChangesSection(clientId, changes, "Date and description are required."), 400);
-	}
+		if (!changeDate || !validateLength(description, 1, 5000)) {
+			return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId, kind), "Date and description are required.", kind), 400);
+		}
 
-	await updateChange(supabase, changeId, { changeDate, description: description.trim(), category });
-	return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId)));
-});
+		await updateChange(supabase, clientId, changeId, { changeDate, description: description.trim(), category }, kind);
+		return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId, kind), undefined, kind));
+	});
 
-app.delete("/api/clients/:id/changes/:changeId", async (c) => {
-	const supabase = createSupabaseClient(c.env);
-	const clientId = c.req.param("id");
-	await deleteChange(supabase, c.req.param("changeId"));
-	return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId)));
-});
+	app.delete(`/api/clients/:id/${path}/:changeId`, async (c) => {
+		const supabase = createSupabaseClient(c.env);
+		const clientId = c.req.param("id");
+		await deleteChange(supabase, clientId, c.req.param("changeId"), kind);
+		return c.html(renderChangesSection(clientId, await listChanges(supabase, clientId, kind), undefined, kind));
+	});
+}
 
 // ---- Links (PRD §13) ----
 

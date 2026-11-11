@@ -75,12 +75,16 @@ export type ClientFilters = {
 export const CHANGE_CATEGORIES = ["Contract", "Contact", "Scope", "Other"] as const;
 export type ChangeCategory = (typeof CHANGE_CATEGORIES)[number];
 
+export const CHANGE_KINDS = ["general", "ad"] as const;
+export type ChangeKind = (typeof CHANGE_KINDS)[number];
+
 export type Change = {
 	id: string;
 	clientId: string;
 	changeDate: string;
 	description: string;
 	category: ChangeCategory | null;
+	kind: ChangeKind;
 	source: "manual" | "system";
 	createdBy: string;
 	createdAt: string;

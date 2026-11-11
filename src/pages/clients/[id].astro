@@ -27,21 +27,24 @@ if (!client) {
 let headerHtml = "";
 let notesHtml = "";
 let changesHtml = "";
+let adChangesHtml = "";
 let linksHtml = "";
 let monthlyDataHtml = "";
 let paidAdsHtml = "";
 let campaignsHtml = "";
 
 if (client) {
-	const [statuses, changes, links] = await Promise.all([
+	const [statuses, changes, adChanges, links] = await Promise.all([
 		listStatuses(supabase),
 		listChanges(supabase, client.id),
+		listChanges(supabase, client.id, "ad"),
 		listLinks(supabase, client.id),
 	]);
 
 	headerHtml = (await renderClientHeader(client, statuses)).toString();
 	notesHtml = (await renderNotesSection(client)).toString();
 	changesHtml = (await renderChangesSection(client.id, changes)).toString();
+	adChangesHtml = (await renderChangesSection(client.id, adChanges, undefined, "ad")).toString();
 	linksHtml = (await renderLinksSection(client.id, links)).toString();
 	[monthlyDataHtml, paidAdsHtml, campaignsHtml] = await Promise.all([
 		renderMonthlyDataSection(supabase, client, statuses, DEFAULT_MONTH_WINDOW),
@@ -70,6 +73,7 @@ if (client) {
 					</div>
 					<Fragment set:html={monthlyDataHtml} />
 					<Fragment set:html={paidAdsHtml} />
+					<Fragment set:html={adChangesHtml} />
 					<Fragment set:html={campaignsHtml} />
 				</div>
 			) : (

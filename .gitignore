@@ -38,3 +38,6 @@ pnpm-debug.log*
 .wrangler/
 # generated from wrangler.jsonc + .dev.vars — run `npm run generate-types` after cloning
 worker-configuration.d.ts
+
+# local data backups (client data — never commit)
+backups/

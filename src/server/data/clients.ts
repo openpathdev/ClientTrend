@@ -10,7 +10,7 @@ const CLIENT_SELECT = `
 	ad_spend_per_month, paid_ads_go_live_date, go_live_date,
 	baseline_clients, baseline_amad, hubspot_new_client_goal, hubspot_amad_goal,
 	integration_hs, integration_iw, integration_clara, integration_acuity, integration_ekyros, integration_coolfocus,
-	campaigns_enabled,
+	campaigns_enabled, paid_ads_title,
 	csm:csms ( id, name, email, active ),
 	status:statuses!inner ( id, name, description, icon, color_line, color_text, color_tint, color_halo, sort_order, active )
 `;
@@ -53,6 +53,7 @@ type ClientQueryRow = {
 	integration_ekyros: boolean;
 	integration_coolfocus: boolean;
 	campaigns_enabled: boolean;
+	paid_ads_title: string | null;
 	csm: { id: string; name: string; email: string | null; active: boolean } | null;
 	status: {
 		id: string;
@@ -100,6 +101,7 @@ function mapClient(row: ClientQueryRow): ClientRow {
 			coolfocus: row.integration_coolfocus,
 		},
 		campaignsEnabled: row.campaigns_enabled,
+		paidAdsTitle: row.paid_ads_title,
 		status: {
 			id: row.status.id,
 			name: row.status.name,
@@ -177,6 +179,13 @@ export async function updatePaidAdsSettings(
 		.from("clients")
 		.update({ ad_spend_per_month: input.adSpendPerMonth, paid_ads_go_live_date: input.goLiveDate })
 		.eq("id", clientId);
+	if (error) throw new Error(error.message);
+	return getClientById(supabase, clientId);
+}
+
+/** CSM-chosen name for the Paid Ads table; null (blank) falls back to "Paid Ads". */
+export async function updatePaidAdsTitle(supabase: SupabaseClient, clientId: string, title: string | null): Promise<ClientRow | null> {
+	const { error } = await supabase.from("clients").update({ paid_ads_title: title }).eq("id", clientId);
 	if (error) throw new Error(error.message);
 	return getClientById(supabase, clientId);
 }

@@ -298,7 +298,8 @@ export function renderMetricCell(
 export function renderMonthlyDataTable(params: {
 	clientId: string;
 	section: CommentSection;
-	title: string;
+	/** Plain text renders as a static heading; pass markup (e.g. renderEditableTitle) for a custom one. */
+	title: string | ReturnType<typeof html>;
 	metrics: MonthlyMetric[];
 	months: string[];
 	values: MonthlyDataValue[];
@@ -325,8 +326,14 @@ export function renderMonthlyDataTable(params: {
 	rowLabel?: (metric: MonthlyMetric) => ReturnType<typeof html>;
 	/** Content under the table — Campaigns uses it for "+ Add campaign". */
 	footer?: ReturnType<typeof html>;
+	/** Element id; defaults to `${section}-section`. Campaigns sets one per section since a client can have several. */
+	domId?: string;
+	/** What "Load earlier months" replaces; defaults to this section. Campaigns reloads all its sections together. */
+	reloadTarget?: string;
 }) {
 	const { clientId, section, title, metrics, months, values, statuses, comments, headerExtra, previousMonthCount, notice, rowLabel, footer } = params;
+	const domId = params.domId ?? `${section}-section`;
+	const reloadTarget = params.reloadTarget ?? `#${domId}`;
 	const byKey = new Map(values.map((v) => [cellKey(v.metricId, v.month), v]));
 	const statusesById = new Map(statuses.map((s) => [s.id, s]));
 	const scrollInit =
@@ -334,17 +341,17 @@ export function renderMonthlyDataTable(params: {
 			? `$el.scrollLeft = $el.scrollWidth * ${(previousMonthCount / months.length).toFixed(4)} - $el.clientWidth / 2`
 			: "$el.scrollLeft = $el.scrollWidth";
 
-	return html`<section id="${section}-section" data-month-count="${String(months.length)}" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
+	return html`<section id="${domId}" data-month-count="${String(months.length)}" class="rounded-2xl border border-card-border bg-surface p-5 shadow-sm">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-3">
-				<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>
+				${typeof title === "string" ? html`<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">${title}</h2>` : title}
 				${headerExtra ?? ""}
 			</div>
 			<div class="flex items-center gap-3">
 				<button
 					type="button"
 					hx-get="/api/clients/${clientId}/${sectionBasePath(section)}?months=${String(months.length + DEFAULT_MONTH_WINDOW)}&previousMonths=${String(months.length)}"
-					hx-target="#${section}-section"
+					hx-target="${reloadTarget}"
 					hx-swap="outerHTML"
 					class="font-mono text-[11px] font-medium text-link hover:underline"
 				>

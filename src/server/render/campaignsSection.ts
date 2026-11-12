@@ -1,11 +1,14 @@
 import { html } from "hono/html";
-import type { MonthlyMetric } from "../data/types";
+import type { CampaignGroup } from "../data/campaigns";
+import { renderEditableTitle } from "./editableTitle";
 
 /**
  * Campaigns-only pieces around the shared grid (renderMonthlyDataTable):
- * the show/hide switch, the editable campaign name in each row's label
- * cell, the "+ Add campaign" button, and the slim card shown while the
- * table is switched off.
+ * the show/hide switch, each campaign's editable title and delete button,
+ * the "+ Add campaign" button, and the slim cards shown while Campaigns are
+ * switched off or empty. Each campaign is its own table (a copy of the Paid
+ * Ads rows); all of them live inside one `#campaigns-section` wrapper, which
+ * every campaign-level change re-renders.
  */
 
 export function renderCampaignsToggle(clientId: string, enabled: boolean, monthCount: number) {
@@ -41,44 +44,31 @@ export function renderCampaignsOff(clientId: string, monthCount: number) {
 	</section>`;
 }
 
-/** Row-label cell content: click the name to rename it; × deletes the campaign (with a confirmation). */
-export function renderCampaignName(clientId: string, campaign: MonthlyMetric, monthCount: number) {
-	return html`<span class="campaign-name flex items-center justify-between gap-2" x-data="{ editing: false }">
+/** A campaign's editable title on its own — what the rename route returns. */
+export function renderCampaignGroupTitleField(clientId: string, group: CampaignGroup, monthCount: number, error?: string) {
+	return renderEditableTitle({
+		value: group.name,
+		fallback: "Untitled campaign",
+		endpoint: `/api/clients/${clientId}/campaign-groups/${group.id}/name`,
+		ariaLabel: "Campaign name",
+		vals: { months: String(monthCount) },
+		error,
+	});
+}
+
+/** A campaign's heading: its editable title plus a × that deletes the campaign after a confirmation. */
+export function renderCampaignGroupTitle(clientId: string, group: CampaignGroup, monthCount: number) {
+	return html`<span class="flex items-center gap-2">
+		${renderCampaignGroupTitleField(clientId, group, monthCount)}
 		<button
 			type="button"
-			x-show="!editing"
-			x-on:click="editing = true; $nextTick(() => $refs.name.focus())"
-			class="max-w-[220px] truncate text-left hover:underline ${campaign.label ? "" : "italic text-muted"}"
-			title="Click to rename"
-		>
-			${campaign.label || "Untitled campaign"}
-		</button>
-		<input
-			x-show="editing"
-			x-cloak
-			x-ref="name"
-			x-on:blur="editing = false"
-			x-on:keydown.escape="editing = false; $el.value = $el.defaultValue"
-			type="text"
-			name="name"
-			value="${campaign.label}"
-			maxlength="200"
-			placeholder="Campaign name"
-			hx-patch="/api/clients/${clientId}/campaigns/${campaign.id}/name"
-			hx-trigger="change, keyup[key=='Enter']"
-			hx-target="closest .campaign-name"
-			hx-swap="outerHTML"
-			class="w-[220px] rounded border border-card-border px-2 py-0.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-selected-filter"
-		/>
-		<button
-			type="button"
-			hx-delete="/api/clients/${clientId}/campaigns/${campaign.id}"
+			hx-delete="/api/clients/${clientId}/campaign-groups/${group.id}"
 			hx-vals='{"months":"${String(monthCount)}"}'
-			hx-confirm="Delete ${campaign.label ? `“${campaign.label}”` : "this campaign"} and all its monthly values?"
+			hx-confirm="Delete this campaign and all its monthly values?"
 			hx-target="#campaigns-section"
 			hx-swap="outerHTML"
-			class="text-[13px] leading-none text-muted hover:text-needs-attention-text"
-			aria-label="Delete campaign ${campaign.label}"
+			class="text-[15px] leading-none text-muted hover:text-needs-attention-text"
+			aria-label="Delete campaign"
 			title="Delete campaign"
 		>
 			×
@@ -86,17 +76,26 @@ export function renderCampaignName(clientId: string, campaign: MonthlyMetric, mo
 	</span>`;
 }
 
-export function renderAddCampaignButton(clientId: string, monthCount: number) {
-	return html`<div class="mt-3">
-		<button
-			type="button"
-			hx-post="/api/clients/${clientId}/campaigns"
-			hx-vals='{"months":"${String(monthCount)}"}'
-			hx-target="#campaigns-section"
-			hx-swap="outerHTML"
-			class="font-mono text-[11px] font-medium text-link hover:underline"
-		>
-			+ Add campaign
-		</button>
-	</div>`;
+export function renderAddCampaignGroupButton(clientId: string, monthCount: number) {
+	return html`<button
+		type="button"
+		hx-post="/api/clients/${clientId}/campaign-groups"
+		hx-vals='{"months":"${String(monthCount)}"}'
+		hx-target="#campaigns-section"
+		hx-swap="outerHTML"
+		class="self-start font-mono text-[11px] font-medium text-link hover:underline"
+	>
+		+ Add campaign
+	</button>`;
+}
+
+/** Shown while Campaigns are on but every campaign has been deleted. */
+export function renderCampaignsEmpty(clientId: string, monthCount: number) {
+	return html`<section class="rounded-2xl border border-card-border bg-surface px-5 py-4 shadow-sm">
+		<div class="flex items-center gap-3">
+			<h2 class="font-sans text-[15px] font-semibold tracking-[-0.01em] text-ink">Campaigns</h2>
+			${renderCampaignsToggle(clientId, true, monthCount)}
+		</div>
+		<p class="mt-2 text-[13px] text-muted">No campaigns yet.</p>
+	</section>`;
 }

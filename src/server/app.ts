@@ -11,6 +11,7 @@ import {
 	updateClientStatus,
 	updateGeneralNotes,
 	updatePaidAdsSettings,
+	updatePaidAdsTitle,
 	updateClientGoLiveDate,
 	updateClientBaselines,
 	updateClientIntegrationFlag,
@@ -26,19 +27,20 @@ import { listPaidAdsMetrics, createPaidAdsMetric } from "./data/paidAdsMetrics";
 import { upsertPaidAdsDataValue, getPaidAdsDataValue, setPaidAdsDataValueStatus, listPaidAdsDataValues, bulkUpsertPaidAdsDataValues } from "./data/paidAdsData";
 import {
 	listCampaigns,
-	createCampaigns,
-	renameCampaign,
-	deleteCampaign,
+	listCampaignGroups,
+	listCampaignsInGroupOf,
+	createCampaignGroup,
+	renameCampaignGroup,
+	deleteCampaignGroup,
 	setCampaignsEnabled,
 	parseCampaignName,
-	STARTER_CAMPAIGN_COUNT,
 	listCampaignDataValues,
 	getCampaignDataValue,
 	upsertCampaignDataValue,
 	bulkUpsertCampaignDataValues,
 	setCampaignDataValueStatus,
 } from "./data/campaigns";
-import { renderCampaignName } from "./render/campaignsSection";
+import { renderCampaignGroupTitleField } from "./render/campaignsSection";
 import { createPasteImport, deletePasteImport, getPasteImport, markPasteImportUndone, type PasteChange } from "./data/pasteImports";
 import { listComments, createComment, updateComment, deleteComment } from "./data/comments";
 import { runHubspotSync, runCatchupImport, tryAutoImportCompany } from "./syncHubspot";
@@ -59,7 +61,7 @@ import { renderMetricCell, renderCellMarkerButton } from "./render/monthlyDataTa
 import { renderCommentPopover } from "./render/commentPanel";
 import { renderMetricAdminPanel } from "./render/metricAdminPanel";
 import { renderPaidAdsSettings } from "./render/paidAdsSettings";
-import { renderMonthlyDataSection, renderPaidAdsSection, renderCampaignsSection } from "./clientDetailSections";
+import { renderMonthlyDataSection, renderPaidAdsSection, renderCampaignsSection, renderPaidAdsTitle, DEFAULT_PAID_ADS_TITLE } from "./clientDetailSections";
 import { DEFAULT_MONTH_WINDOW, trailingMonths } from "./months";
 import { isValidLinkUrl, isValidUuid, validateLength, parseMonthlyCellValue } from "./validation";
 import { PASTE_MAX_CHARS, cellsToWrite, displayText, isValidMonth, parseClipboardTable, planPaste } from "./pasteImport";
@@ -525,7 +527,9 @@ const PASTE_SECTIONS = [
 	{
 		path: "campaigns",
 		section: "campaigns",
-		listMetrics: (supabase: SupabaseClient, clientId: string) => listCampaigns(supabase, clientId),
+		// With a start row, only that row's campaign — a paste never spills into the next campaign's table.
+		listMetrics: (supabase: SupabaseClient, clientId: string, startMetricId?: string) =>
+			startMetricId ? listCampaignsInGroupOf(supabase, clientId, startMetricId) : listCampaigns(supabase, clientId),
 		listValues: listCampaignDataValues,
 		bulkUpsert: bulkUpsertCampaignDataValues,
 		renderSection: renderCampaignsSection,
@@ -552,7 +556,7 @@ for (const config of PASTE_SECTIONS) {
 		if (text.length > PASTE_MAX_CHARS) return { ok: false, error: "That's too much to paste at once. Copy a smaller block of cells." } as const;
 
 		const supabase = createSupabaseClient(c.env);
-		const metrics = await config.listMetrics(supabase, clientId);
+		const metrics = await config.listMetrics(supabase, clientId, metricId);
 		const metric = metrics.find((m) => m.id === metricId);
 		if (!metric) return { ok: false, error: "That row no longer exists. Reload the page and try again." } as const;
 		if (metric.source === "hubspot") return { ok: false, error: "This row is filled automatically from HubSpot and can't be pasted into." } as const;
@@ -675,6 +679,21 @@ for (const config of PASTE_SECTIONS) {
 	});
 }
 
+/** Renames the client's Paid Ads table; blank goes back to the default "Paid Ads". */
+app.patch("/api/clients/:id/paid-ads/title", async (c) => {
+	const supabase = createSupabaseClient(c.env);
+	const clientId = c.req.param("id");
+	if (!isValidUuid(clientId)) return c.text("Client not found", 404);
+	const client = await getClientById(supabase, clientId);
+	if (!client) return c.text("Client not found", 404);
+	const body = await c.req.parseBody();
+	const parsed = parseCampaignName(typeof body.name === "string" ? body.name : "", "Title");
+	if (!parsed.ok) return c.html(renderPaidAdsTitle(client, parsed.error), 400);
+	const updated = await updatePaidAdsTitle(supabase, clientId, parsed.name === "" || parsed.name === DEFAULT_PAID_ADS_TITLE ? null : parsed.name);
+	if (!updated) return c.text("Client not found", 404);
+	return c.html(renderPaidAdsTitle(updated));
+});
+
 /**
  * Go-live date + ad spend/mo — simple manually-entered client fields, not
  * derived from any metric (PRD §11). `view` tells us which shaped fragment
@@ -774,7 +793,7 @@ app.get("/api/clients/:id/paid-ads", async (c) => {
 	return c.html(renderPaidAdsSection(supabase, client, statuses, monthCount, previousMonthCount));
 });
 
-// ---- Campaigns (per-client rows under Paid Ads; see the campaigns migration) ----
+// ---- Campaigns (per-client copies of the Paid Ads table; see the campaigns migrations) ----
 
 /** Reads the shared "months" form/query field the Campaigns controls send, so a re-render keeps the window the CSM had loaded. */
 function readCampaignMonths(c: Context<AppEnv>, body?: Record<string, unknown>): number {
@@ -796,41 +815,48 @@ app.patch("/api/clients/:id/campaigns/enabled", async (c) => {
 	const body = await c.req.parseBody();
 	const enabled = body.checked === "true";
 	await setCampaignsEnabled(supabase, clientId, enabled);
-	// First switch-on: start the company off with a few blank rows to fill in.
-	if (enabled && (await listCampaigns(supabase, clientId)).length === 0) {
-		await createCampaigns(supabase, clientId, STARTER_CAMPAIGN_COUNT, c.get("userEmail"));
+	// First switch-on: start the company off with one blank campaign to name and fill in.
+	if (enabled && (await listCampaignGroups(supabase, clientId)).length === 0) {
+		await createCampaignGroup(supabase, clientId, "", c.get("userEmail"));
 	}
 	return renderCampaignsFor(c, clientId, readCampaignMonths(c, body));
 });
 
-app.post("/api/clients/:id/campaigns", async (c) => {
+// ---- Campaigns: each is its own titled copy of the Paid Ads table ----
+
+app.post("/api/clients/:id/campaign-groups", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const clientId = c.req.param("id");
-	if (!isValidUuid(clientId)) return c.text("Client not found", 404);
+	if (!isValidUuid(clientId) || !(await getClientById(supabase, clientId))) return c.text("Client not found", 404);
 	const body = await c.req.parseBody();
-	await createCampaigns(supabase, clientId, 1, c.get("userEmail"));
+	await createCampaignGroup(supabase, clientId, "", c.get("userEmail"));
 	return renderCampaignsFor(c, clientId, readCampaignMonths(c, body));
 });
 
-app.patch("/api/clients/:id/campaigns/:campaignId/name", async (c) => {
+app.patch("/api/clients/:id/campaign-groups/:groupId/name", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const clientId = c.req.param("id");
-	const campaignId = c.req.param("campaignId");
-	if (!isValidUuid(clientId) || !isValidUuid(campaignId)) return c.text("Not found", 404);
+	const groupId = c.req.param("groupId");
+	if (!isValidUuid(clientId) || !isValidUuid(groupId)) return c.text("Not found", 404);
 	const body = await c.req.parseBody();
+	const monthCount = readCampaignMonths(c, body);
 	const parsed = parseCampaignName(typeof body.name === "string" ? body.name : "");
-	if (!parsed.ok) return c.text(parsed.error, 400);
-	const renamed = await renameCampaign(supabase, clientId, campaignId, parsed.name);
+	if (!parsed.ok) {
+		const current = (await listCampaignGroups(supabase, clientId)).find((g) => g.id === groupId);
+		if (!current) return c.text("Campaign not found", 404);
+		return c.html(renderCampaignGroupTitleField(clientId, current, monthCount, parsed.error), 400);
+	}
+	const renamed = await renameCampaignGroup(supabase, clientId, groupId, parsed.name);
 	if (!renamed) return c.text("Campaign not found", 404);
-	return c.html(renderCampaignName(clientId, renamed, readCampaignMonths(c, body)));
+	return c.html(renderCampaignGroupTitleField(clientId, renamed, monthCount));
 });
 
-app.delete("/api/clients/:id/campaigns/:campaignId", async (c) => {
+app.delete("/api/clients/:id/campaign-groups/:groupId", async (c) => {
 	const supabase = createSupabaseClient(c.env);
 	const clientId = c.req.param("id");
-	const campaignId = c.req.param("campaignId");
-	if (!isValidUuid(clientId) || !isValidUuid(campaignId)) return c.text("Not found", 404);
-	await deleteCampaign(supabase, clientId, campaignId);
+	const groupId = c.req.param("groupId");
+	if (!isValidUuid(clientId) || !isValidUuid(groupId)) return c.text("Not found", 404);
+	await deleteCampaignGroup(supabase, clientId, groupId);
 	// htmx sends hx-vals for DELETE as query params (see the comment DELETE route).
 	return renderCampaignsFor(c, clientId, readCampaignMonths(c));
 });
@@ -852,7 +878,8 @@ async function loadCampaignCell(c: Context<AppEnv>) {
 	const campaignId = c.req.param("campaignId") ?? "";
 	const month = c.req.param("month") ?? "";
 	if (!isValidUuid(clientId) || !isValidUuid(campaignId) || !isValidMonth(month)) return null;
-	const [campaigns, statuses] = await Promise.all([listCampaigns(supabase, clientId), listStatuses(supabase)]);
+	// Zebra striping counts rows within this cell's own campaign table.
+	const [campaigns, statuses] = await Promise.all([listCampaignsInGroupOf(supabase, clientId, campaignId), listStatuses(supabase)]);
 	const index = campaigns.findIndex((m) => m.id === campaignId);
 	if (index === -1) return null;
 	const bgClass = index % 2 === 0 ? "bg-surface" : "bg-zebra-row";

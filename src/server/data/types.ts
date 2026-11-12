@@ -64,6 +64,8 @@ export type ClientRow = {
 	integrationFlags: Record<IntegrationFlag, boolean>;
 	/** Whether the client page shows the per-client Campaigns table (off by default; turning it off keeps the data). */
 	campaignsEnabled: boolean;
+	/** CSM-chosen name for the Paid Ads table; null means the default "Paid Ads". */
+	paidAdsTitle: string | null;
 };
 
 export type ClientFilters = {
